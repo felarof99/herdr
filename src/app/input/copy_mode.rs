@@ -28,17 +28,18 @@ impl App {
             });
         if capture_comment {
             let previous_toast = self.state.toast.clone();
-            if let Err(error) =
-                self.invoke_plugin_action_from_keybind("felarof.comments.capture".to_string())
-            {
-                self.state.toast = Some(crate::app::state::ToastNotification {
-                    kind: crate::app::state::ToastKind::NeedsAttention,
-                    title: "comment capture failed".to_string(),
-                    context: error,
-                    position: None,
-                    target: None,
-                });
-                self.sync_toast_deadline(previous_toast);
+            match self.invoke_plugin_action_from_keybind("felarof.comments.capture".to_string()) {
+                Ok(()) => self.state.clear_copy_mode_selection(),
+                Err(error) => {
+                    self.state.toast = Some(crate::app::state::ToastNotification {
+                        kind: crate::app::state::ToastKind::NeedsAttention,
+                        title: "comment capture failed".to_string(),
+                        context: error,
+                        position: None,
+                        target: None,
+                    });
+                    self.sync_toast_deadline(previous_toast);
+                }
             }
             return;
         }
@@ -191,7 +192,8 @@ impl AppState {
         };
         match ch {
             'q' => self.exit_copy_mode(terminal_runtimes, false),
-            'y' => self.exit_copy_mode(terminal_runtimes, true),
+            // felarrof: this is custom felarof code
+            'y' | 'C' => self.exit_copy_mode(terminal_runtimes, true),
             'v' | ' ' => self.begin_copy_mode_selection(terminal_runtimes),
             'V' => self.select_copy_mode_line(terminal_runtimes),
             'h' => self.move_copy_cursor(terminal_runtimes, 0, -1),
