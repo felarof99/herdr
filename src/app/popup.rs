@@ -32,6 +32,8 @@ impl App {
         } else {
             Mode::Navigate
         };
+        // felarrof: this is custom felarof code
+        self.state.sync_copy_mode_with_focus();
         self.render_dirty.request_generic();
         self.render_notify.notify_one();
         true

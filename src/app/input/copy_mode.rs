@@ -20,6 +20,28 @@ impl App {
             self.state.mode = Mode::Prefix;
             return;
         }
+        // felarrof: this is custom felarof code
+        let capture_comment = key.code == KeyCode::Char('c')
+            && key.modifiers.is_empty()
+            && self.state.copy_mode.as_ref().is_some_and(|copy_mode| {
+                copy_mode.search.prompt.is_none() && copy_mode.selection.is_some()
+            });
+        if capture_comment {
+            let previous_toast = self.state.toast.clone();
+            if let Err(error) =
+                self.invoke_plugin_action_from_keybind("felarof.comments.capture".to_string())
+            {
+                self.state.toast = Some(crate::app::state::ToastNotification {
+                    kind: crate::app::state::ToastKind::NeedsAttention,
+                    title: "comment capture failed".to_string(),
+                    context: error,
+                    position: None,
+                    target: None,
+                });
+                self.sync_toast_deadline(previous_toast);
+            }
+            return;
+        }
         self.state
             .handle_copy_mode_key(&self.terminal_runtimes, key);
         self.dispatch_pending_clipboard_write();

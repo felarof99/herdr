@@ -392,12 +392,17 @@ impl App {
                 "width and height are only supported when placement is popup",
             );
         }
-        if placement == PluginPanePlacement::Popup && self.state.mode != crate::app::Mode::Terminal
+        // felarrof: this is custom felarof code
+        if placement == PluginPanePlacement::Popup
+            && !matches!(
+                self.state.mode,
+                crate::app::Mode::Terminal | crate::app::Mode::Copy
+            )
         {
             return encode_error(
                 id,
                 "ui_busy",
-                "popup panes can only open from the normal workspace view",
+                "popup panes can only open from the normal workspace or copy mode",
             );
         }
         match placement {
