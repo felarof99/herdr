@@ -2,11 +2,14 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::agents::{AgentViewFilter, AgentViewSort};
 use super::common::AgentStatus;
 use super::common::SplitDirection;
 use super::panes::PaneInfo;
 use super::workspaces::WorkspaceWorktreeInfo;
 use crate::popup_size::PopupSize;
+
+pub(crate) const PLUGIN_ID_MAX_CHARS: usize = 120;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PluginLinkParams {
@@ -57,6 +60,8 @@ pub struct InstalledPluginInfo {
     pub events: Vec<PluginManifestEventHook>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub panes: Vec<PluginManifestPane>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_views: Vec<PluginManifestAgentView>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_handlers: Vec<PluginManifestLinkHandler>,
     #[serde(default)]
@@ -276,6 +281,14 @@ pub struct PluginManifestPane {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<PopupSize>,
     pub command: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginManifestAgentView {
+    pub id: String,
+    pub label: String,
+    pub filter: AgentViewFilter,
+    pub sort: Vec<AgentViewSort>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

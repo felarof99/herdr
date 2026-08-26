@@ -34,6 +34,18 @@ impl App {
             .into_iter()
             .map(|plugin| (plugin.plugin_id.clone(), plugin))
             .collect();
+        let stale_source = self.state.agent_view_override.as_ref().and_then(|active| {
+            let plugin_id = active.source.strip_prefix("plugin:")?;
+            let owner_available = self
+                .state
+                .installed_plugins
+                .get(plugin_id)
+                .is_some_and(|plugin| plugin.enabled && plugin_manifest_available(plugin));
+            (!owner_available).then(|| active.source.clone())
+        });
+        if let Some(source) = stale_source {
+            self.clear_agent_view_for_source(&source);
+        }
     }
 
     fn refresh_installed_plugins(&mut self) -> std::io::Result<()> {
@@ -671,7 +683,7 @@ fn normalize_optional_plugin_id(
     }
 }
 
-fn plugin_manifest_available(plugin: &InstalledPluginInfo) -> bool {
+pub(crate) fn plugin_manifest_available(plugin: &InstalledPluginInfo) -> bool {
     !plugin.warnings.iter().any(|warning| {
         warning.starts_with(crate::persist::plugin_registry::MANIFEST_UNAVAILABLE_WARNING_PREFIX)
     })
@@ -713,6 +725,8 @@ mod tests {
     #[cfg(unix)]
     use crate::api::schema::PaneListParams;
     use crate::api::schema::{
+        AgentViewBuiltinField, AgentViewBuiltinSortField, AgentViewField, AgentViewFilter,
+        AgentViewSetParams, AgentViewSort, AgentViewSortField, AgentViewSortOrder, AgentViewValue,
         Method, PluginSourceInfo, PluginSourceKind, Request, SuccessResponse,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1244,6 +1258,184 @@ command = ["echo", "b"]
 
         let result = load_plugin_manifest(&root.display().to_string(), true);
         assert!(matches!(result, Err(("duplicate_plugin_pane_id", _))));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_manifest_agent_views_load_and_sort_by_id() {
+        let root = unique_temp_path("plugin-agent-views");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.agent-views"
+name = "Agent Views"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos", "windows"]
+
+[[agent_views]]
+id = "working"
+label = "Working"
+filter = { op = "eq", field = "status", value = "working" }
+sort = [{ field = "pane_order", order = "desc" }]
+
+[[agent_views]]
+id = "active"
+label = "  Active  "
+filter = { op = "not", filter = { op = "eq", field = "status", value = "idle" } }
+sort = [{ field = "workspace_order" }, { field = "tab_order" }, { field = "pane_order" }]
+"#,
+        );
+
+        let plugin = load_plugin_manifest(&root.display().to_string(), true)
+            .expect("agent view manifest should load");
+
+        assert_eq!(
+            plugin
+                .agent_views
+                .iter()
+                .map(|view| view.id.as_str())
+                .collect::<Vec<_>>(),
+            ["active", "working"]
+        );
+        assert_eq!(plugin.agent_views[0].label, "Active");
+        assert_eq!(
+            plugin.agent_views[0].filter,
+            AgentViewFilter::Not {
+                filter: Box::new(AgentViewFilter::Eq {
+                    field: AgentViewField::Builtin(AgentViewBuiltinField::Status),
+                    value: AgentViewValue::String("idle".into()),
+                }),
+            }
+        );
+        assert_eq!(
+            plugin.agent_views[0].sort,
+            [
+                AgentViewSort {
+                    field: AgentViewSortField::Builtin(AgentViewBuiltinSortField::WorkspaceOrder),
+                    order: AgentViewSortOrder::Asc,
+                },
+                AgentViewSort {
+                    field: AgentViewSortField::Builtin(AgentViewBuiltinSortField::TabOrder),
+                    order: AgentViewSortOrder::Asc,
+                },
+                AgentViewSort {
+                    field: AgentViewSortField::Builtin(AgentViewBuiltinSortField::PaneOrder),
+                    order: AgentViewSortOrder::Asc,
+                },
+            ]
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_manifest_agent_view_accepts_max_length_plugin_id() {
+        let root = unique_temp_path("plugin-agent-view-max-plugin-id");
+        let plugin_id = "p".repeat(120);
+        write_manifest_content(
+            &root,
+            &format!(
+                r#"
+id = "{plugin_id}"
+name = "Max Plugin ID"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos", "windows"]
+
+[[agent_views]]
+id = "active"
+label = "Active"
+filter = {{ op = "eq", field = "status", value = "working" }}
+sort = []
+"#
+            ),
+        );
+
+        let plugin = load_plugin_manifest(&root.display().to_string(), true)
+            .expect("max-length plugin id should support agent views");
+
+        assert_eq!(plugin.plugin_id, plugin_id);
+        assert_eq!(plugin.agent_views[0].id, "active");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_manifest_without_agent_views_defaults_to_empty() {
+        let root = unique_temp_path("plugin-no-agent-views");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.no-agent-views"
+name = "No Agent Views"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos", "windows"]
+"#,
+        );
+
+        let plugin = load_plugin_manifest(&root.display().to_string(), true)
+            .expect("legacy manifest should load");
+
+        assert!(plugin.agent_views.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_manifest_rejects_invalid_agent_view_id() {
+        let root = unique_temp_path("plugin-invalid-agent-view-id");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.invalid-agent-view"
+name = "Invalid Agent View"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos", "windows"]
+
+[[agent_views]]
+id = "active.view"
+label = "Active"
+filter = { op = "eq", field = "status", value = "working" }
+sort = []
+"#,
+        );
+
+        let result = load_plugin_manifest(&root.display().to_string(), true);
+
+        assert!(matches!(result, Err(("invalid_plugin_agent_view_id", _))));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_manifest_rejects_duplicate_agent_view_ids_after_normalization() {
+        let root = unique_temp_path("plugin-duplicate-agent-view-id");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.duplicate-agent-view"
+name = "Duplicate Agent View"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos", "windows"]
+
+[[agent_views]]
+id = "active"
+label = "Active"
+filter = { op = "eq", field = "status", value = "working" }
+sort = []
+
+[[agent_views]]
+id = " active "
+label = "Also Active"
+filter = { op = "eq", field = "status", value = "blocked" }
+sort = []
+"#,
+        );
+
+        let result = load_plugin_manifest(&root.display().to_string(), true);
+
+        assert!(matches!(result, Err(("duplicate_plugin_agent_view_id", _))));
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2171,6 +2363,51 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
         });
         let value: serde_json::Value = serde_json::from_str(&pane).unwrap();
         assert_eq!(value["error"]["code"], "plugin_manifest_unavailable");
+    }
+
+    #[test]
+    fn registry_refresh_clears_view_owned_by_unavailable_plugin() {
+        let mut app = test_app();
+        let root = unique_temp_path("plugin-agent-view-unavailable");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.agent-views"
+name = "Agent Views"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos", "windows"]
+
+[[agent_views]]
+id = "working"
+label = "Working"
+filter = { op = "eq", field = "status", value = "working" }
+sort = []
+"#,
+        );
+        let plugin = load_plugin_manifest(&root.display().to_string(), true).unwrap();
+        app.replace_installed_plugins(vec![plugin.clone()]);
+        app.state.agent_view_override = Some(AgentViewSetParams {
+            source: "plugin:example.agent-views".into(),
+            label: Some("Working".into()),
+            filter: Some(AgentViewFilter::Eq {
+                field: AgentViewField::Builtin(AgentViewBuiltinField::Status),
+                value: AgentViewValue::String("working".into()),
+            }),
+            sort: Vec::new(),
+        });
+
+        std::fs::remove_dir_all(&root).unwrap();
+        app.replace_installed_plugins(vec![plugin]);
+
+        let refreshed = app
+            .state
+            .installed_plugins
+            .get("example.agent-views")
+            .unwrap();
+        assert!(refreshed.warnings.iter().any(|warning| warning
+            .starts_with(crate::persist::plugin_registry::MANIFEST_UNAVAILABLE_WARNING_PREFIX)));
+        assert!(app.state.agent_view_override.is_none());
     }
 
     #[test]

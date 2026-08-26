@@ -466,7 +466,15 @@ impl AppState {
     }
 
     pub(super) fn on_agent_panel_sort_toggle(&self, col: u16, row: u16) -> bool {
-        if self.sidebar_collapsed || self.agent_view_override.is_some() {
+        if self.sidebar_collapsed {
+            return false;
+        }
+
+        let plugin_views =
+            crate::app::agent_view::available_plugin_agent_views(&self.installed_plugins);
+        if self.agent_view_override.is_some()
+            && self.active_plugin_agent_view_index(&plugin_views).is_none()
+        {
             return false;
         }
 
@@ -474,12 +482,58 @@ impl AppState {
             self.view.sidebar_rect,
             self.sidebar_section_split,
         );
-        let rect = crate::ui::agent_panel_toggle_rect(detail_area, self.agent_panel_sort);
+        let rect = crate::ui::agent_panel_toggle_rect(detail_area, self);
         rect.width > 0
             && col >= rect.x
             && col < rect.x + rect.width
             && row >= rect.y
             && row < rect.y + rect.height
+    }
+
+    fn active_plugin_agent_view_index(
+        &self,
+        plugin_views: &[crate::app::agent_view::AvailablePluginAgentView],
+    ) -> Option<usize> {
+        let active = self.agent_view_override.as_ref()?;
+        let selection = self.plugin_agent_view_selection.as_ref()?;
+        plugin_views
+            .iter()
+            .position(|view| &view.selection == selection && &view.spec == active)
+    }
+
+    pub(super) fn cycle_agent_panel_view(&mut self) {
+        let plugin_views =
+            crate::app::agent_view::available_plugin_agent_views(&self.installed_plugins);
+        if self.agent_view_override.is_some() {
+            let Some(index) = self.active_plugin_agent_view_index(&plugin_views) else {
+                return;
+            };
+            if let Some(next) = plugin_views.get(index + 1) {
+                self.agent_view_override = Some(next.spec.clone());
+                self.plugin_agent_view_selection = Some(next.selection.clone());
+            } else {
+                self.agent_view_override = None;
+                self.plugin_agent_view_selection = None;
+                self.agent_panel_sort = crate::app::state::AgentPanelSort::Priority;
+            }
+        } else {
+            self.plugin_agent_view_selection = None;
+            match self.agent_panel_sort {
+                crate::app::state::AgentPanelSort::Spaces => {
+                    if let Some(first) = plugin_views.first() {
+                        self.agent_view_override = Some(first.spec.clone());
+                        self.plugin_agent_view_selection = Some(first.selection.clone());
+                    } else {
+                        self.agent_panel_sort = crate::app::state::AgentPanelSort::Priority;
+                    }
+                }
+                crate::app::state::AgentPanelSort::Priority => {
+                    self.agent_panel_sort = crate::app::state::AgentPanelSort::Spaces;
+                }
+            }
+        }
+        self.agent_panel_scroll = 0;
+        self.mobile_switcher_scroll = 0;
     }
 
     pub(super) fn agent_detail_target_at(
@@ -530,11 +584,68 @@ mod tests {
 
     use super::super::{app_for_mouse_test, capture_snapshot, mouse, unique_temp_path};
     use crate::{
+        api::schema::{
+            AgentViewBuiltinField, AgentViewBuiltinSortField, AgentViewField, AgentViewFilter,
+            AgentViewSetParams, AgentViewSort, AgentViewSortField, AgentViewSortOrder,
+            AgentViewValue, InstalledPluginInfo, Method, PluginManifestAgentView, PluginSourceInfo,
+        },
         app::state::{AgentPanelSort, DragTarget, Mode},
         config::SidebarCollapsedModeConfig,
         detect::{Agent, AgentState},
         workspace::Workspace,
     };
+
+    fn installed_plugin_with_agent_views(
+        plugin_id: &str,
+        enabled: bool,
+        agent_views: Vec<PluginManifestAgentView>,
+        warnings: Vec<String>,
+    ) -> InstalledPluginInfo {
+        InstalledPluginInfo {
+            plugin_id: plugin_id.into(),
+            name: plugin_id.into(),
+            version: "0.1.0".into(),
+            min_herdr_version: "0.8.1".into(),
+            description: None,
+            manifest_path: String::new(),
+            plugin_root: String::new(),
+            enabled,
+            platforms: None,
+            build: Vec::new(),
+            startup: Vec::new(),
+            actions: Vec::new(),
+            events: Vec::new(),
+            panes: Vec::new(),
+            agent_views,
+            link_handlers: Vec::new(),
+            source: PluginSourceInfo::default(),
+            warnings,
+        }
+    }
+
+    fn click_agent_panel_toggle(app: &mut crate::app::App) {
+        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
+            app.state.view.sidebar_rect,
+            app.state.sidebar_section_split,
+        );
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            detail_area.x + detail_area.width.saturating_sub(1),
+            detail_area.y + 1,
+        ));
+    }
+
+    fn plugin_agent_view(id: &str, label: &str) -> PluginManifestAgentView {
+        PluginManifestAgentView {
+            id: id.into(),
+            label: label.into(),
+            filter: AgentViewFilter::Eq {
+                field: AgentViewField::Builtin(AgentViewBuiltinField::Status),
+                value: AgentViewValue::String("working".into()),
+            },
+            sort: Vec::new(),
+        }
+    }
 
     #[test]
     fn clicking_launcher_opens_global_menu() {
@@ -844,27 +955,231 @@ mod tests {
     }
 
     #[test]
-    fn clicking_agent_panel_toggle_switches_sort() {
+    fn clicking_agent_panel_toggle_cycles_plugin_view_and_builtin_sorts() {
         let mut app = app_for_mouse_test();
         app.state.workspaces = vec![Workspace::test_new("test")];
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
         app.state.agent_panel_scroll = 3;
-
-        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
-            app.state.view.sidebar_rect,
-            app.state.sidebar_section_split,
+        app.state.mobile_switcher_scroll = 4;
+        app.state.installed_plugins.insert(
+            "example.views".into(),
+            installed_plugin_with_agent_views(
+                "example.views",
+                true,
+                vec![PluginManifestAgentView {
+                    id: "working".into(),
+                    label: "Working".into(),
+                    filter: AgentViewFilter::Eq {
+                        field: AgentViewField::Builtin(AgentViewBuiltinField::Status),
+                        value: AgentViewValue::String("working".into()),
+                    },
+                    sort: vec![AgentViewSort {
+                        field: AgentViewSortField::Builtin(AgentViewBuiltinSortField::PaneOrder),
+                        order: AgentViewSortOrder::Desc,
+                    }],
+                }],
+                Vec::new(),
+            ),
         );
-        let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
-        app.handle_mouse(mouse(
-            MouseEventKind::Down(MouseButton::Left),
-            toggle.x,
-            toggle.y,
-        ));
+
+        click_agent_panel_toggle(&mut app);
+
+        assert_eq!(
+            app.state.agent_view_override,
+            Some(AgentViewSetParams {
+                source: "plugin:example.views".into(),
+                label: Some("Working".into()),
+                filter: Some(AgentViewFilter::Eq {
+                    field: AgentViewField::Builtin(AgentViewBuiltinField::Status),
+                    value: AgentViewValue::String("working".into()),
+                }),
+                sort: vec![AgentViewSort {
+                    field: AgentViewSortField::Builtin(AgentViewBuiltinSortField::PaneOrder),
+                    order: AgentViewSortOrder::Desc,
+                }],
+            })
+        );
+        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Spaces);
+        assert_eq!(app.state.agent_panel_scroll, 0);
+        assert_eq!(app.state.mobile_switcher_scroll, 0);
+
+        app.state.agent_panel_scroll = 2;
+        app.state.mobile_switcher_scroll = 3;
+        click_agent_panel_toggle(&mut app);
 
         assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Priority);
+        assert!(app.state.agent_view_override.is_none());
         assert_eq!(app.state.agent_panel_scroll, 0);
+        assert_eq!(app.state.mobile_switcher_scroll, 0);
+
+        click_agent_panel_toggle(&mut app);
+
+        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Spaces);
+        assert!(app.state.agent_view_override.is_none());
+    }
+
+    #[test]
+    fn plugin_agent_views_cycle_by_plugin_id_then_preset_id() {
+        let mut app = app_for_mouse_test();
+        app.state.installed_plugins.insert(
+            "z.plugin".into(),
+            installed_plugin_with_agent_views(
+                "z.plugin",
+                true,
+                vec![
+                    plugin_agent_view("beta", "Z beta"),
+                    plugin_agent_view("alpha", "Z alpha"),
+                ],
+                Vec::new(),
+            ),
+        );
+        app.state.installed_plugins.insert(
+            "a.plugin".into(),
+            installed_plugin_with_agent_views(
+                "a.plugin",
+                true,
+                vec![
+                    plugin_agent_view("beta", "A beta"),
+                    plugin_agent_view("alpha", "A alpha"),
+                ],
+                Vec::new(),
+            ),
+        );
+
+        for expected in [
+            Some(("plugin:a.plugin", "A alpha")),
+            Some(("plugin:a.plugin", "A beta")),
+            Some(("plugin:z.plugin", "Z alpha")),
+            Some(("plugin:z.plugin", "Z beta")),
+            None,
+        ] {
+            click_agent_panel_toggle(&mut app);
+            assert_eq!(
+                app.state.agent_view_override.as_ref().map(|view| (
+                    view.source.as_str(),
+                    view.label.as_deref().unwrap_or("filtered")
+                )),
+                expected
+            );
+        }
+        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Priority);
+
+        click_agent_panel_toggle(&mut app);
+        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Spaces);
+    }
+
+    #[test]
+    fn identical_plugin_agent_view_queries_do_not_stall_cycle() {
+        let mut app = app_for_mouse_test();
+        app.state.installed_plugins.insert(
+            "example.views".into(),
+            installed_plugin_with_agent_views(
+                "example.views",
+                true,
+                vec![
+                    plugin_agent_view("alpha", "Working"),
+                    plugin_agent_view("beta", "Working"),
+                ],
+                Vec::new(),
+            ),
+        );
+
+        click_agent_panel_toggle(&mut app);
+        assert!(app.state.agent_view_override.is_some());
+
+        click_agent_panel_toggle(&mut app);
+        assert!(app.state.agent_view_override.is_some());
+
+        click_agent_panel_toggle(&mut app);
+        assert!(app.state.agent_view_override.is_none());
+        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Priority);
+    }
+
+    #[test]
+    fn plugin_agent_view_cycle_skips_disabled_and_unavailable_plugins() {
+        let mut app = app_for_mouse_test();
+        app.state.installed_plugins.insert(
+            "a.disabled".into(),
+            installed_plugin_with_agent_views(
+                "a.disabled",
+                false,
+                vec![plugin_agent_view("view", "Disabled")],
+                Vec::new(),
+            ),
+        );
+        app.state.installed_plugins.insert(
+            "b.unavailable".into(),
+            installed_plugin_with_agent_views(
+                "b.unavailable",
+                true,
+                vec![plugin_agent_view("view", "Unavailable")],
+                vec![format!(
+                    "{}missing manifest",
+                    crate::persist::plugin_registry::MANIFEST_UNAVAILABLE_WARNING_PREFIX
+                )],
+            ),
+        );
+        app.state.installed_plugins.insert(
+            "c.available".into(),
+            installed_plugin_with_agent_views(
+                "c.available",
+                true,
+                vec![plugin_agent_view("view", "Available")],
+                Vec::new(),
+            ),
+        );
+
+        click_agent_panel_toggle(&mut app);
+
+        assert_eq!(
+            app.state
+                .agent_view_override
+                .as_ref()
+                .map(|view| (view.source.as_str(), view.label.as_deref())),
+            Some(("plugin:c.available", Some("Available")))
+        );
+    }
+
+    #[test]
+    fn arbitrary_plugin_agent_view_override_remains_non_clickable() {
+        let mut app = app_for_mouse_test();
+        app.state.installed_plugins.insert(
+            "example.views".into(),
+            installed_plugin_with_agent_views(
+                "example.views",
+                true,
+                vec![plugin_agent_view("working", "Working")],
+                Vec::new(),
+            ),
+        );
+        let custom = AgentViewSetParams {
+            source: "plugin:example.views".into(),
+            label: Some("Working".into()),
+            filter: Some(AgentViewFilter::Eq {
+                field: AgentViewField::Builtin(AgentViewBuiltinField::Status),
+                value: AgentViewValue::String("working".into()),
+            }),
+            sort: Vec::new(),
+        };
+        let response =
+            app.dispatch_api_request("test.agent-view.set", Method::AgentViewSet(custom.clone()));
+        let response: crate::api::schema::SuccessResponse =
+            serde_json::from_str(&response).unwrap();
+        assert!(matches!(
+            response.result,
+            crate::api::schema::ResponseResult::AgentView { active: true, .. }
+        ));
+        app.state.agent_panel_scroll = 3;
+        app.state.mobile_switcher_scroll = 4;
+
+        click_agent_panel_toggle(&mut app);
+
+        assert_eq!(app.state.agent_view_override, Some(custom));
+        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Spaces);
+        assert_eq!(app.state.agent_panel_scroll, 3);
+        assert_eq!(app.state.mobile_switcher_scroll, 4);
     }
 
     #[test]

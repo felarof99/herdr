@@ -636,6 +636,7 @@ impl App {
             agent_panel_sort,
             status_indicators: config.ui.status_indicators,
             agent_view_override: None,
+            plugin_agent_view_selection: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
             next_agent_state_change_seq: 0,

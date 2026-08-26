@@ -13,8 +13,14 @@ const MAX_FILTER_DEPTH: usize = 8;
 const MAX_FILTER_NODES: usize = 64;
 const MAX_FILTER_VALUES: usize = 32;
 const MAX_SORT_FIELDS: usize = 8;
-const MAX_SOURCE_CHARS: usize = 120;
+const MAX_SOURCE_CHARS: usize = "plugin:".len() + crate::api::schema::plugins::PLUGIN_ID_MAX_CHARS;
 const MAX_LABEL_CHARS: usize = 32;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AvailablePluginAgentView {
+    pub selection: crate::app::state::PluginAgentViewSelection,
+    pub spec: AgentViewSetParams,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum EvalValue {
@@ -48,6 +54,43 @@ pub(crate) fn validate_agent_view(spec: &mut AgentViewSetParams) -> Result<(), S
 
 pub(crate) fn validate_agent_view_source(source: &str) -> Result<String, String> {
     normalize_source(source)
+}
+
+pub(crate) fn available_plugin_agent_views(
+    plugins: &crate::app::state::InstalledPluginRegistry,
+) -> Vec<AvailablePluginAgentView> {
+    let mut views = plugins
+        .values()
+        .filter(|plugin| {
+            plugin.enabled && crate::app::api::plugins::plugin_manifest_available(plugin)
+        })
+        .flat_map(|plugin| {
+            plugin
+                .agent_views
+                .iter()
+                .map(move |view| (plugin.plugin_id.as_str(), view))
+        })
+        .collect::<Vec<_>>();
+    views.sort_by(|(left_plugin_id, left), (right_plugin_id, right)| {
+        left_plugin_id
+            .cmp(right_plugin_id)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    views
+        .into_iter()
+        .map(|(plugin_id, view)| AvailablePluginAgentView {
+            selection: crate::app::state::PluginAgentViewSelection {
+                plugin_id: plugin_id.to_string(),
+                view_id: view.id.clone(),
+            },
+            spec: AgentViewSetParams {
+                source: format!("plugin:{plugin_id}"),
+                label: Some(view.label.clone()),
+                filter: Some(view.filter.clone()),
+                sort: view.sort.clone(),
+            },
+        })
+        .collect()
 }
 
 pub(crate) fn apply_agent_view(app: &AppState, entries: &mut Vec<AgentPanelEntry>) {

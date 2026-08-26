@@ -934,6 +934,20 @@ fn plugin_link_list_unlink_round_trip() {
             height: None,
             command: vec!["bun".into(), "run".into(), "board.ts".into()],
         }],
+        agent_views: vec![PluginManifestAgentView {
+            id: "active".into(),
+            label: "Active".into(),
+            filter: AgentViewFilter::Not {
+                filter: Box::new(AgentViewFilter::Eq {
+                    field: AgentViewField::Builtin(AgentViewBuiltinField::Status),
+                    value: AgentViewValue::String("idle".into()),
+                }),
+            },
+            sort: vec![AgentViewSort {
+                field: AgentViewSortField::Builtin(AgentViewBuiltinSortField::WorkspaceOrder),
+                order: AgentViewSortOrder::Asc,
+            }],
+        }],
         link_handlers: vec![PluginManifestLinkHandler {
             id: "github-pr".into(),
             title: "Open GitHub PR".into(),
@@ -944,6 +958,19 @@ fn plugin_link_list_unlink_round_trip() {
         source: Default::default(),
         warnings: vec![],
     };
+
+    assert_eq!(
+        serde_json::to_value(&plugin).unwrap()["agent_views"][0],
+        serde_json::json!({
+            "id": "active",
+            "label": "Active",
+            "filter": {
+                "op": "not",
+                "filter": { "op": "eq", "field": "status", "value": "idle" }
+            },
+            "sort": [{ "field": "workspace_order", "order": "asc" }]
+        })
+    );
 
     for response in [
         SuccessResponse {

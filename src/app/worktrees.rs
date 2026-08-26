@@ -1758,6 +1758,7 @@ mod tests {
                     command: vec!["sh".into(), "-c".into(), "true".into()],
                 }],
                 panes: Vec::new(),
+                agent_views: Vec::new(),
                 link_handlers: Vec::new(),
                 source: crate::api::schema::PluginSourceInfo::default(),
                 warnings: Vec::new(),

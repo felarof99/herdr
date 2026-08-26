@@ -85,8 +85,8 @@ fn agent_panel_sort_label(sort: AgentPanelSort) -> &'static str {
     }
 }
 
-pub(crate) fn agent_panel_toggle_rect(area: Rect, sort: AgentPanelSort) -> Rect {
-    agent_panel_header_label_rect(area, agent_panel_sort_label(sort))
+pub(crate) fn agent_panel_toggle_rect(area: Rect, app: &AppState) -> Rect {
+    agent_panel_header_label_rect(area, agent_panel_control_label(app))
 }
 
 fn agent_panel_header_label_rect(area: Rect, label: &str) -> Rect {
@@ -103,10 +103,11 @@ fn agent_panel_header_label_rect(area: Rect, label: &str) -> Rect {
     )
 }
 
-fn active_agent_view_label(app: &AppState) -> Option<&str> {
-    app.agent_view_override
-        .as_ref()
-        .map(|view| view.label.as_deref().unwrap_or("filtered"))
+fn agent_panel_control_label(app: &AppState) -> &str {
+    app.agent_view_override.as_ref().map_or_else(
+        || agent_panel_sort_label(app.agent_panel_sort),
+        |view| view.label.as_deref().unwrap_or("filtered"),
+    )
 }
 
 pub(crate) fn agent_panel_entries(app: &AppState) -> Vec<AgentPanelEntry> {
@@ -1445,8 +1446,7 @@ fn render_agent_detail(
         )])),
         Rect::new(area.x, area.y + 1, area.width, 1),
     );
-    let control_label = active_agent_view_label(app)
-        .unwrap_or_else(|| agent_panel_sort_label(app.agent_panel_sort));
+    let control_label = agent_panel_control_label(app);
     let toggle_rect = agent_panel_header_label_rect(area, control_label);
     if toggle_rect != Rect::default() {
         let color = if app.agent_view_override.is_some() {

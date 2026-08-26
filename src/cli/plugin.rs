@@ -1701,6 +1701,7 @@ mod tests {
             actions: vec![],
             events: vec![],
             panes: vec![],
+            agent_views: vec![],
             link_handlers: vec![],
             source: PluginSourceInfo {
                 kind: PluginSourceKind::Github,

@@ -1014,6 +1014,12 @@ pub enum AgentPanelSort {
     Priority,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PluginAgentViewSelection {
+    pub plugin_id: String,
+    pub view_id: String,
+}
+
 // ---------------------------------------------------------------------------
 // Settings UI state
 // ---------------------------------------------------------------------------
@@ -1468,6 +1474,8 @@ pub struct AppState {
     pub status_indicators: crate::config::StatusIndicatorStyle,
     /// Transient session-wide projection override for the built-in Agents view.
     pub agent_view_override: Option<crate::api::schema::AgentViewSetParams>,
+    /// Sidebar-selected manifest preset identity. API-installed overrides leave this unset.
+    pub(crate) plugin_agent_view_selection: Option<PluginAgentViewSelection>,
     pub sidebar_agents: crate::config::AgentsSidebarConfig,
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
     pub next_agent_state_change_seq: u64,
@@ -1861,6 +1869,7 @@ impl AppState {
             agent_panel_sort: AgentPanelSort::Spaces,
             status_indicators: crate::config::StatusIndicatorStyle::Dots,
             agent_view_override: None,
+            plugin_agent_view_selection: None,
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
             next_agent_state_change_seq: 0,
