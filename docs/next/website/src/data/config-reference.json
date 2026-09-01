@@ -828,6 +828,12 @@
           "description": "Complete Agent-row overrides keyed by strict canonical agent id. Agents without an override use ui.sidebar.agents.rows."
         },
         {
+          "key": "ui.sidebar.agents.wrap",
+          "type": "integer",
+          "default": "1",
+          "description": "Display lines a single expanded Agent sidebar row may occupy, 1 to 4. The default 1 truncates a row too wide for the panel; above that the row wraps onto up to this many lines, breaking on spaces, and only the last line it is allowed is elided. Only a row holding exactly one text token wraps: a row with several tokens already drops tokens to fit."
+        },
+        {
           "key": "ui.sidebar.spaces.row_gap",
           "type": "integer",
           "default": "0",

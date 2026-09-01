@@ -24,9 +24,47 @@ pub(super) enum ResolvedTokenKind {
     Custom(String),
 }
 
+impl ResolvedTokenKind {
+    /// The token's text, for the variants that carry free text. `StateIcon` and
+    /// `GitStatus` render from their own state and have none.
+    pub(super) fn text(&self) -> Option<&str> {
+        match self {
+            Self::StateText(text)
+            | Self::Workspace(text)
+            | Self::Tab(text)
+            | Self::Pane(text)
+            | Self::Agent(text)
+            | Self::TerminalTitle(text)
+            | Self::Branch(text)
+            | Self::Custom(text) => Some(text),
+            Self::StateIcon | Self::GitStatus { .. } => None,
+        }
+    }
+
+    fn with_text(&self, text: String) -> Option<Self> {
+        Some(match self {
+            Self::StateText(_) => Self::StateText(text),
+            Self::Workspace(_) => Self::Workspace(text),
+            Self::Tab(_) => Self::Tab(text),
+            Self::Pane(_) => Self::Pane(text),
+            Self::Agent(_) => Self::Agent(text),
+            Self::TerminalTitle(_) => Self::TerminalTitle(text),
+            Self::Branch(_) => Self::Branch(text),
+            Self::Custom(_) => Self::Custom(text),
+            Self::StateIcon | Self::GitStatus { .. } => return None,
+        })
+    }
+}
+
 impl ResolvedToken {
     fn new(kind: ResolvedTokenKind, style: SidebarTokenStyle) -> Self {
         Self { kind, style }
+    }
+
+    /// The same token carrying `text` instead of its own — one wrapped line of
+    /// it. Keeps the style so every line of a wrapped row looks alike.
+    pub(super) fn with_text(&self, text: String) -> Option<Self> {
+        Some(Self::new(self.kind.with_text(text)?, self.style))
     }
 
     #[cfg(test)]
