@@ -372,6 +372,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # [ui.sidebar.agents]
 # Blank rows between agent entries. Set to 1 to restore the previous spacing.
 # row_gap = 0
+# Display lines one row may occupy, 1 to 4. The default 1 truncates a row too
+# wide for the panel; above that it wraps onto up to this many lines, breaking on
+# spaces, and only the last line it is allowed is elided. Only a row holding
+# exactly one text token wraps — a row with several tokens already drops tokens
+# to fit.
+# wrap = 1
 # rows = [["state_icon", "workspace", "tab"], ["agent"]]
 # Optional canonical agent IDs replace the default rows for matching agents.
 # [ui.sidebar.agents.rows_by_agent]
