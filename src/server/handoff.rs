@@ -23,7 +23,15 @@ const READY_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(unix)]
 const OWNED_ACK_TIMEOUT: Duration = Duration::from_millis(500);
 #[cfg(unix)]
-pub(crate) const MAX_FDS_PER_HANDOFF: usize = 64;
+/// Panes transferable in one live handoff, bounded by how many descriptors fit
+/// in a single SCM_RIGHTS control message.
+///
+/// The kernel ceiling is 253 on both platforms we run on — Linux defines
+/// SCM_MAX_FD as 253, and macOS was measured to accept 253 and reject 256 with
+/// EINVAL. 200 keeps a margin under that while being far above any real pane
+/// count; 64 was well under what a session actually reaches, and turned an
+/// ordinary update into "close panes or restart herdr normally".
+pub(crate) const MAX_FDS_PER_HANDOFF: usize = 200;
 #[cfg(unix)]
 pub(crate) const MAX_REPLAY_BYTES_PER_PANE: usize = 8 * 1024;
 #[cfg(unix)]
@@ -520,5 +528,37 @@ mod tests {
             serde_json::from_value(value).expect("an older manifest should still load");
 
         assert!(older.api_window_title.is_none());
+    }
+
+    /// The cap only earns its keep if the kernel really accepts that many
+    /// descriptors in one control message. Linux caps SCM_RIGHTS at
+    /// SCM_MAX_FD (253) and macOS rejects 256 with EINVAL, so anything at or
+    /// below 253 is transferable and a lower cap is our own choice, not theirs.
+    #[test]
+    fn the_handoff_cap_stays_within_what_one_scm_rights_message_can_carry() {
+        const SCM_MAX_FD: usize = 253;
+        const {
+            assert!(
+                MAX_FDS_PER_HANDOFF <= SCM_MAX_FD,
+                "the handoff cap exceeds what one SCM_RIGHTS message can carry"
+            )
+        };
+    }
+
+    #[test]
+    fn sending_the_cap_worth_of_descriptors_is_accepted_by_the_kernel() {
+        use std::os::fd::AsRawFd;
+
+        let (sender, receiver) = UnixStream::pair().expect("socketpair");
+        let files = (0..MAX_FDS_PER_HANDOFF)
+            .map(|_| std::fs::File::open("/dev/null").expect("open /dev/null"))
+            .collect::<Vec<_>>();
+        let fds = files
+            .iter()
+            .map(|file| file.as_raw_fd())
+            .collect::<Vec<_>>();
+
+        send_fds(&sender, &fds).expect("the kernel should accept a full handoff batch");
+        drop(receiver);
     }
 }
