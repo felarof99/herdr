@@ -810,6 +810,36 @@
           ]
         },
         {
+          "key": "ui.status_colors.working",
+          "type": "string",
+          "default": "unset",
+          "description": "Color for agents that are actively working. Unset keeps the active theme's yellow. Accepts hex (#89b4fa), named colors (cyan, blue), or rgb(r,g,b)."
+        },
+        {
+          "key": "ui.status_colors.blocked",
+          "type": "string",
+          "default": "unset",
+          "description": "Color for agents waiting on you. Unset keeps the active theme's red. Accepts hex (#89b4fa), named colors (cyan, blue), or rgb(r,g,b)."
+        },
+        {
+          "key": "ui.status_colors.done",
+          "type": "string",
+          "default": "unset",
+          "description": "Color for agents that finished and have not been looked at yet. Unset keeps the active theme's teal. Accepts hex (#89b4fa), named colors (cyan, blue), or rgb(r,g,b)."
+        },
+        {
+          "key": "ui.status_colors.idle",
+          "type": "string",
+          "default": "unset",
+          "description": "Color for agents that are idle and already seen. Unset keeps the active theme's green. Accepts hex (#89b4fa), named colors (cyan, blue), or rgb(r,g,b)."
+        },
+        {
+          "key": "ui.status_colors.unknown",
+          "type": "string",
+          "default": "unset",
+          "description": "Color for agents with no detected state. Unset keeps the active theme's muted overlay color. Accepts hex (#89b4fa), named colors (cyan, blue), or rgb(r,g,b)."
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",

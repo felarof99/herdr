@@ -647,6 +647,33 @@ impl Palette {
     }
 }
 
+/// Resolved per-state agent status colors.
+///
+/// Each slot is `None` unless `[ui.status_colors]` sets it, and `None` means the
+/// active [`Palette`] supplies the color, so defaults follow theme switches. The
+/// table is resolved once at config load/reload, never inside a render loop.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StatusColors {
+    pub working: Option<Color>,
+    pub blocked: Option<Color>,
+    pub done: Option<Color>,
+    pub idle: Option<Color>,
+    pub unknown: Option<Color>,
+}
+
+impl StatusColors {
+    pub fn from_config(config: &crate::config::StatusColorsConfig) -> Self {
+        use crate::config::StatusColorSlot;
+        Self {
+            working: config.resolved(StatusColorSlot::Working),
+            blocked: config.resolved(StatusColorSlot::Blocked),
+            done: config.resolved(StatusColorSlot::Done),
+            idle: config.resolved(StatusColorSlot::Idle),
+            unknown: config.resolved(StatusColorSlot::Unknown),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkspaceCardArea {
     pub ws_idx: usize,
@@ -1472,6 +1499,8 @@ pub struct AppState {
     pub sidebar_section_split: f32,
     pub agent_panel_sort: AgentPanelSort,
     pub status_indicators: crate::config::StatusIndicatorStyle,
+    /// Per-state status colors resolved from `[ui.status_colors]`.
+    pub status_colors: StatusColors,
     /// Transient session-wide projection override for the built-in Agents view.
     pub agent_view_override: Option<crate::api::schema::AgentViewSetParams>,
     /// Sidebar-selected manifest preset identity. API-installed overrides leave this unset.
@@ -1868,6 +1897,7 @@ impl AppState {
             sidebar_section_split: 0.5,
             agent_panel_sort: AgentPanelSort::Spaces,
             status_indicators: crate::config::StatusIndicatorStyle::Dots,
+            status_colors: StatusColors::default(),
             agent_view_override: None,
             plugin_agent_view_selection: None,
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),

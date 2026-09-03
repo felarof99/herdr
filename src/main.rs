@@ -364,6 +364,16 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # distinct static glyphs for blocked, working, done, idle, and unknown states.
 # status_indicators = "dots"
 
+# Optional per-state status colors for the agent status icon and its status text.
+# Every key is optional; an omitted table or key keeps the active theme's color.
+# Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
+# [ui.status_colors]
+# working = "#71b7ff"   # default: the theme's yellow
+# blocked = "#ffd60a"   # default: the theme's red
+# done = "#94e2d5"      # default: the theme's teal
+# idle = "#a6e3a1"      # default: the theme's green
+# unknown = "#6c7086"   # default: the theme's muted overlay color
+
 # Expanded agent rows. Built-ins are state_icon, state_text, workspace, tab, pane, agent,
 # terminal_title, and terminal_title_stripped.
 # Custom values reported through pane metadata use a $name token.
