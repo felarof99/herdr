@@ -672,6 +672,20 @@ impl StatusColors {
             unknown: config.resolved(StatusColorSlot::Unknown),
         }
     }
+
+    /// The configured color for one rendered state, if `[ui.status_colors]` set it.
+    ///
+    /// `AgentState::Idle` splits on `seen`: an unseen idle agent is `done`, a seen
+    /// one is `idle`, matching the labels the sidebar draws.
+    pub fn for_state(&self, state: AgentState, seen: bool) -> Option<Color> {
+        match (state, seen) {
+            (AgentState::Blocked, _) => self.blocked,
+            (AgentState::Working, _) => self.working,
+            (AgentState::Idle, false) => self.done,
+            (AgentState::Idle, true) => self.idle,
+            (AgentState::Unknown, _) => self.unknown,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

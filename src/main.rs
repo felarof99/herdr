@@ -368,11 +368,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Every key is optional; an omitted table or key keeps the active theme's color.
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # [ui.status_colors]
-# working = "#71b7ff"   # default: the theme's yellow
-# blocked = "#ffd60a"   # default: the theme's red
-# done = "#94e2d5"      # default: the theme's teal
-# idle = "#a6e3a1"      # default: the theme's green
-# unknown = "#6c7086"   # default: the theme's muted overlay color
+# working = "#a6e3a1"   # default: the theme's yellow
+# blocked = "#f38ba8"   # default: the theme's red
+# done = "#89b4fa"      # default: the theme's teal
+# idle = "#6c7086"      # default: the theme's green
+# unknown = "#45475a"   # default: the theme's muted overlay color
 
 # Expanded agent rows. Built-ins are state_icon, state_text, workspace, tab, pane, agent,
 # terminal_title, and terminal_title_stripped.
