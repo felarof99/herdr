@@ -327,14 +327,14 @@ status_indicators = "symbols"
 
 ```toml
 [ui.status_colors]
-working = "#71b7ff"   # 既定: テーマの yellow
-blocked = "#ffd60a"   # 既定: テーマの red
-done = "#94e2d5"      # 既定: テーマの teal
-idle = "#a6e3a1"      # 既定: テーマの green
-unknown = "#6c7086"   # 既定: テーマの控えめなオーバーレイ色
+working = "#a6e3a1"   # 既定: テーマの yellow
+blocked = "#f38ba8"   # 既定: テーマの red
+done = "#89b4fa"      # 既定: テーマの teal
+idle = "#6c7086"      # 既定: テーマの green
+unknown = "#45475a"   # 既定: テーマの控えめなオーバーレイ色
 ```
 
-`working` は実行中の Agent、`blocked` はあなたの操作を待っている Agent、`done` は完了済みでまだ見ていない Agent、`idle` は完了済みで確認済みの Agent、`unknown` は状態を検出できない Agent です。値は `ui.accent` と同じ書式を受け付けます: 16 進数(`#89b4fa`)、色名(`cyan`、`blue`)、`rgb(r,g,b)`。これらの色は状態アイコンと対応する状態テキストに適用され、設定のリロード時に読み直されます。認識できない値は設定診断として報告され、テーマの色にフォールバックします。
+`working` は実行中の Agent、`blocked` はあなたの操作を待っている Agent、`done` は完了済みでまだ見ていない Agent、`idle` は完了済みで確認済みの Agent、`unknown` は状態を検出できない Agent です。値は `ui.accent` と同じ書式を受け付けます: 16 進数(`#89b4fa`)、色名(`cyan`、`blue`)、`rgb(r,g,b)`。これらの色は状態が描画されるすべての場所に適用されます: サイドバーとナビゲーターの状態アイコンと対応する状態テキスト、モバイルヘッダーの集計、そして要対応・完了トーストのドットです。設定のリロード時に読み直されます。認識できない値は設定診断として報告され、テーマの色にフォールバックします。
 
 ### サイドバーの行レイアウト
 

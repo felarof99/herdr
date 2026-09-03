@@ -327,14 +327,14 @@ status_indicators = "symbols"
 
 ```toml
 [ui.status_colors]
-working = "#71b7ff"   # 默认：主题的 yellow
-blocked = "#ffd60a"   # 默认：主题的 red
-done = "#94e2d5"      # 默认：主题的 teal
-idle = "#a6e3a1"      # 默认：主题的 green
-unknown = "#6c7086"   # 默认：主题的柔和叠加色
+working = "#a6e3a1"   # 默认：主题的 yellow
+blocked = "#f38ba8"   # 默认：主题的 red
+done = "#89b4fa"      # 默认：主题的 teal
+idle = "#6c7086"      # 默认：主题的 green
+unknown = "#45475a"   # 默认：主题的柔和叠加色
 ```
 
-`working` 表示正在运行的智能体，`blocked` 表示正在等待你的智能体，`done` 表示已完成且尚未查看的智能体，`idle` 表示已完成且已查看的智能体，`unknown` 表示 Herdr 无法检测状态的智能体。取值接受与 `ui.accent` 相同的语法：十六进制（`#89b4fa`）、颜色名称（`cyan`、`blue`）或 `rgb(r,g,b)`。这些颜色应用于状态图标及其对应的状态文本，并在配置重新加载时重新读取。无法识别的取值会作为配置诊断报告，并回退到主题颜色。
+`working` 表示正在运行的智能体，`blocked` 表示正在等待你的智能体，`done` 表示已完成且尚未查看的智能体，`idle` 表示已完成且已查看的智能体，`unknown` 表示 Herdr 无法检测状态的智能体。取值接受与 `ui.accent` 相同的语法：十六进制（`#89b4fa`）、颜色名称（`cyan`、`blue`）或 `rgb(r,g,b)`。这些颜色应用于所有绘制状态的位置：侧边栏和导航器中的状态图标及其对应的状态文本、移动端头部的汇总，以及需要关注和已完成通知中的圆点。它们会在配置重新加载时重新读取。无法识别的取值会作为配置诊断报告，并回退到主题颜色。
 
 ### 侧边栏行布局
 
