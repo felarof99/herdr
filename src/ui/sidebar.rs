@@ -2697,6 +2697,74 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         );
     }
 
+    /// Guards the plumbing, not the mapping: every icon must be drawn from
+    /// `app.status_colors`, not from a default `StatusColors`.
+    #[test]
+    fn configured_status_colors_reach_collapsed_and_expanded_icons() {
+        let first = Workspace::test_new("one");
+        let first_pane = first.tabs[0].root_pane;
+        let second = Workspace::test_new("two");
+        let second_pane = second.tabs[0].root_pane;
+
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![first, second];
+        app.ensure_test_terminals();
+        app.agent_panel_sort = crate::app::state::AgentPanelSort::Priority;
+        let blocked = ratatui::style::Color::Rgb(1, 2, 3);
+        let done = ratatui::style::Color::Rgb(4, 5, 6);
+        app.status_colors = crate::app::state::StatusColors {
+            blocked: Some(blocked),
+            done: Some(done),
+            ..Default::default()
+        };
+
+        let set_state = |app: &mut crate::app::state::AppState, ws_idx: usize, pane_id, state| {
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Claude);
+            terminal.state = state;
+        };
+        set_state(&mut app, 0, first_pane, AgentState::Idle);
+        set_state(&mut app, 1, second_pane, AgentState::Blocked);
+        app.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&first_pane)
+            .unwrap()
+            .seen = false;
+
+        // Collapsed: priority order lists the blocked agent, then the unseen done one.
+        let area = Rect::new(0, 0, 4, 16);
+        let (_, _, detail_area) = collapsed_sidebar_sections(area);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar_collapsed(&app, frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(detail_area.x + 2, detail_area.y)].symbol(), "●");
+        assert_eq!(
+            buffer[(detail_area.x + 2, detail_area.y)].style().fg,
+            Some(blocked)
+        );
+        assert_eq!(
+            buffer[(detail_area.x + 2, detail_area.y + 1)].style().fg,
+            Some(done)
+        );
+
+        // Expanded: the agent panel's first row opens with the blocked agent's icon.
+        let area = Rect::new(0, 0, 26, 20);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (_, agent_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
+        let body = agent_panel_body_rect(agent_area, false);
+        let icon_x = find_symbol_x(buffer, body.y, body.width, "●");
+        assert_eq!(buffer[(icon_x, body.y)].style().fg, Some(blocked));
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn all_workspaces_agent_panel_entries_use_live_root_runtime_cwd_for_workspace_label() {

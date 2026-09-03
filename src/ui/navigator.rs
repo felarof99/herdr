@@ -594,6 +594,32 @@ mod tests {
     use super::*;
     use crate::detect::AgentState;
 
+    #[test]
+    fn state_chips_use_configured_status_colors() {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut spans = Vec::new();
+        push_state_chip(&mut spans, AgentState::Working, true, "working", &app);
+        assert_eq!(spans[0].style.fg, Some(app.palette.yellow));
+        assert_eq!(spans[2].style.fg, Some(app.palette.yellow));
+
+        let working = ratatui::style::Color::Rgb(1, 2, 3);
+        app.status_colors.working = Some(working);
+        let mut spans = Vec::new();
+        push_state_chip(&mut spans, AgentState::Working, true, "working", &app);
+        assert_eq!(spans[0].style.fg, Some(working));
+        assert_eq!(spans[2].style.fg, Some(working));
+
+        // The done chip is the unseen idle state; the idle chip is the seen one.
+        let done = ratatui::style::Color::Rgb(4, 5, 6);
+        app.status_colors.done = Some(done);
+        let mut spans = Vec::new();
+        push_state_chip(&mut spans, AgentState::Idle, false, "done", &app);
+        assert_eq!(spans[0].style.fg, Some(done));
+        let mut spans = Vec::new();
+        push_state_chip(&mut spans, AgentState::Idle, true, "idle", &app);
+        assert_eq!(spans[0].style.fg, Some(app.palette.green));
+    }
+
     fn row(depth: u8, is_workspace: bool) -> NavigatorRow {
         NavigatorRow {
             target: NavigatorTarget::Workspace { ws_idx: 0 },

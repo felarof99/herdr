@@ -85,13 +85,10 @@ pub(super) fn render_toast_notification(
     toast: &ToastNotification,
     offset_for_warning: bool,
     position: ToastHerdrPosition,
+    status_colors: &StatusColors,
     p: &Palette,
 ) {
-    let dot_color = match toast.kind {
-        ToastKind::NeedsAttention => p.red,
-        ToastKind::Finished => p.blue,
-        ToastKind::UpdateInstalled => p.accent,
-    };
+    let dot_color = toast_dot_color(toast.kind, status_colors, p);
     let toast_area = toast_notification_rect(area, toast, offset_for_warning, position);
 
     frame.render_widget(Clear, toast_area);
@@ -245,14 +242,28 @@ pub(super) fn state_label_color(
     status_colors: &StatusColors,
     p: &Palette,
 ) -> Color {
-    let (configured, default) = match (state, seen) {
-        (AgentState::Blocked, _) => (status_colors.blocked, p.red),
-        (AgentState::Working, _) => (status_colors.working, p.yellow),
-        (AgentState::Idle, false) => (status_colors.done, p.teal),
-        (AgentState::Idle, true) => (status_colors.idle, p.green),
-        (AgentState::Unknown, _) => (status_colors.unknown, p.overlay0),
+    let default = match (state, seen) {
+        (AgentState::Blocked, _) => p.red,
+        (AgentState::Working, _) => p.yellow,
+        (AgentState::Idle, false) => p.teal,
+        (AgentState::Idle, true) => p.green,
+        (AgentState::Unknown, _) => p.overlay0,
     };
-    configured.unwrap_or(default)
+    status_colors.for_state(state, seen).unwrap_or(default)
+}
+
+/// Dot color for a toast, following the state it announces.
+///
+/// A needs-attention toast is a blocked agent and a finished toast is a done
+/// one, so a configured `blocked` or `done` color carries over to the dot.
+/// Unset slots keep the colors toasts have always used, which are not the
+/// sidebar's defaults: finished is the theme's blue, not its teal.
+pub(super) fn toast_dot_color(kind: ToastKind, status_colors: &StatusColors, p: &Palette) -> Color {
+    match kind {
+        ToastKind::NeedsAttention => status_colors.blocked.unwrap_or(p.red),
+        ToastKind::Finished => status_colors.done.unwrap_or(p.blue),
+        ToastKind::UpdateInstalled => p.accent,
+    }
 }
 
 #[cfg(test)]
@@ -455,6 +466,45 @@ blocked = "#ffd60a"
         assert_eq!(
             StatusColors::from_config(&empty.ui.status_colors),
             StatusColors::default()
+        );
+    }
+
+    #[test]
+    fn toast_dots_follow_configured_blocked_and_done_colors() {
+        let palette = Palette::catppuccin();
+        let unset = StatusColors::default();
+        assert_eq!(
+            toast_dot_color(ToastKind::NeedsAttention, &unset, &palette),
+            palette.red
+        );
+        assert_eq!(
+            toast_dot_color(ToastKind::Finished, &unset, &palette),
+            palette.blue
+        );
+        assert_eq!(
+            toast_dot_color(ToastKind::UpdateInstalled, &unset, &palette),
+            palette.accent
+        );
+
+        let configured = StatusColors {
+            blocked: Some(Color::Rgb(1, 2, 3)),
+            done: Some(Color::Rgb(4, 5, 6)),
+            // Working and idle never announce a toast, so they must not leak in.
+            working: Some(Color::Rgb(7, 8, 9)),
+            idle: Some(Color::Rgb(10, 11, 12)),
+            ..StatusColors::default()
+        };
+        assert_eq!(
+            toast_dot_color(ToastKind::NeedsAttention, &configured, &palette),
+            Color::Rgb(1, 2, 3)
+        );
+        assert_eq!(
+            toast_dot_color(ToastKind::Finished, &configured, &palette),
+            Color::Rgb(4, 5, 6)
+        );
+        assert_eq!(
+            toast_dot_color(ToastKind::UpdateInstalled, &configured, &palette),
+            palette.accent
         );
     }
 
