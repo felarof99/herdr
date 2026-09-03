@@ -2696,6 +2696,28 @@
           ],
           "type": "object"
         },
+        "PaneMuteMode": {
+          "enum": [
+            "muted",
+            "unmuted"
+          ],
+          "type": "string"
+        },
+        "PaneMuteSetParams": {
+          "properties": {
+            "mode": {
+              "$ref": "#/schemas/request/$defs/PaneMuteMode"
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id",
+            "mode"
+          ],
+          "type": "object"
+        },
         "PaneNeighborParams": {
           "properties": {
             "direction": {
@@ -5379,6 +5401,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PaneInputSetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.mute.set",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneMuteSetParams"
             }
           },
           "required": [
