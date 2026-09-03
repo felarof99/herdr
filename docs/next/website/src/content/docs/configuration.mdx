@@ -327,6 +327,19 @@ status_indicators = "symbols"
 
 The symbols are static, so this option does not enable spinner animation.
 
+Each state also has its own color. `[ui.status_colors]` overrides them one at a time; an absent table, or an absent key, keeps the color the active theme already supplies:
+
+```toml
+[ui.status_colors]
+working = "#71b7ff"   # default: the theme's yellow
+blocked = "#ffd60a"   # default: the theme's red
+done = "#94e2d5"      # default: the theme's teal
+idle = "#a6e3a1"      # default: the theme's green
+unknown = "#6c7086"   # default: the theme's muted overlay color
+```
+
+`working` is an agent that is running, `blocked` is one waiting on you, `done` is one that finished and has not been looked at yet, `idle` is one that finished and has been seen, and `unknown` is one whose state Herdr cannot detect. Values accept the same syntax as `ui.accent`: hex (`#89b4fa`), named colors (`cyan`, `blue`), or `rgb(r,g,b)`. The colors apply to the status icon and its matching status text, and are re-read on config reload. An unrecognized value is reported as a config diagnostic and falls back to the theme color.
+
 ### Sidebar row layouts
 
 The expanded desktop sidebar renders each inner array in `rows` as one line. These are the complete default layouts:

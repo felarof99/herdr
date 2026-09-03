@@ -5,6 +5,7 @@ mod keybinds;
 mod model;
 mod sidebar;
 mod sound;
+mod status_colors;
 mod tab_bar;
 mod theme;
 mod window_title;
@@ -32,6 +33,7 @@ pub use self::{
         SpaceSidebarToken, SpacesSidebarConfig,
     },
     sound::SoundConfig,
+    status_colors::{StatusColorSlot, StatusColorsConfig},
     tab_bar::TabBarRightEntryConfig,
     theme::{parse_color, CustomThemeColors, ThemeConfig, THEME_NAMES},
     window_title::{WindowTitlePart, WindowTitleTemplate, WindowTitleToken},
@@ -89,6 +91,7 @@ impl Config {
             .chain(self.remote_image_paste_key().err())
             .chain(self.theme.diagnostics())
             .chain(self.ui.sound.diagnostics())
+            .chain(self.ui.status_colors.diagnostics())
             .chain(tab_bar_right_diagnostics(&self.ui.tab_bar_right))
             .chain(window_title_diagnostics(&self.ui.window_title))
             .chain(self.invalid_sidebar_bounds_diagnostic())
