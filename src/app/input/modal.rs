@@ -819,19 +819,66 @@ pub(super) fn apply_context_menu_action(
                 state.mode = Mode::Navigate;
             }
         }
-        (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("New tab")) => {
+        (
+            ContextMenuKind::Tab {
+                ws_idx, tab_idx, ..
+            },
+            Some("New tab"),
+        ) => {
             state.selected = ws_idx;
             state.active = Some(ws_idx);
             state.switch_tab(tab_idx);
             open_new_tab_dialog(state);
         }
-        (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("Rename")) => {
+        (
+            ContextMenuKind::Tab {
+                ws_idx, tab_idx, ..
+            },
+            Some("Rename"),
+        ) => {
             state.selected = ws_idx;
             state.active = Some(ws_idx);
             state.switch_tab(tab_idx);
             open_rename_active_tab(state, false);
         }
-        (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("Close")) => {
+        (
+            ContextMenuKind::Tab {
+                ws_idx, tab_idx, ..
+            },
+            Some(action @ ("Mute tab" | "Unmute tab")),
+        ) => {
+            let terminal_ids = state
+                .workspaces
+                .get(ws_idx)
+                .and_then(|workspace| workspace.tabs.get(tab_idx))
+                .map(|tab| {
+                    tab.panes
+                        .values()
+                        .map(|pane| pane.attached_terminal_id.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let mut changed = false;
+            for terminal_id in terminal_ids {
+                if let Some(terminal) = state.terminals.get_mut(&terminal_id) {
+                    changed |= if action == "Mute tab" {
+                        terminal.mute()
+                    } else {
+                        terminal.unmute()
+                    };
+                }
+            }
+            if changed {
+                state.mark_session_dirty();
+            }
+            state.mode = Mode::Terminal;
+        }
+        (
+            ContextMenuKind::Tab {
+                ws_idx, tab_idx, ..
+            },
+            Some("Close"),
+        ) => {
             state.selected = ws_idx;
             state.active = Some(ws_idx);
             state.switch_tab(tab_idx);
@@ -859,6 +906,29 @@ pub(super) fn apply_context_menu_action(
                         terminal.clear_manual_label();
                         state.mark_session_dirty();
                     }
+                }
+            }
+            state.mode = Mode::Terminal;
+        }
+        (
+            ContextMenuKind::Pane {
+                ws_idx, pane_id, ..
+            },
+            Some(action @ ("Mute pane" | "Unmute pane")),
+        ) => {
+            let terminal_id = state
+                .workspaces
+                .get(ws_idx)
+                .and_then(|workspace| workspace.terminal_id(pane_id))
+                .cloned();
+            if let Some(terminal) = terminal_id.and_then(|id| state.terminals.get_mut(&id)) {
+                let changed = if action == "Mute pane" {
+                    terminal.mute()
+                } else {
+                    terminal.unmute()
+                };
+                if changed {
+                    state.mark_session_dirty();
                 }
             }
             state.mode = Mode::Terminal;
@@ -1249,17 +1319,62 @@ impl App {
                     self.state.mode = Mode::Navigate;
                 }
             }
-            (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("New tab")) => {
+            (
+                ContextMenuKind::Tab {
+                    ws_idx, tab_idx, ..
+                },
+                Some("New tab"),
+            ) => {
                 self.focus_workspace_idx_via_api(ws_idx);
                 self.focus_tab_idx_via_api(tab_idx);
                 open_new_tab_dialog(&mut self.state);
             }
-            (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("Rename")) => {
+            (
+                ContextMenuKind::Tab {
+                    ws_idx, tab_idx, ..
+                },
+                Some("Rename"),
+            ) => {
                 self.focus_workspace_idx_via_api(ws_idx);
                 self.focus_tab_idx_via_api(tab_idx);
                 open_rename_active_tab(&mut self.state, false);
             }
-            (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("Close")) => {
+            (
+                ContextMenuKind::Tab {
+                    ws_idx, tab_idx, ..
+                },
+                Some(action @ ("Mute tab" | "Unmute tab")),
+            ) => {
+                let pane_ids = self
+                    .state
+                    .workspaces
+                    .get(ws_idx)
+                    .and_then(|workspace| workspace.tabs.get(tab_idx))
+                    .map(|tab| tab.panes.keys().copied().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                for pane_id in pane_ids {
+                    if let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) {
+                        self.runtime_pane_mute_set(
+                            "tui.tab.mute.set",
+                            crate::api::schema::PaneMuteSetParams {
+                                pane_id,
+                                mode: if action == "Mute tab" {
+                                    crate::api::schema::PaneMuteMode::Muted
+                                } else {
+                                    crate::api::schema::PaneMuteMode::Unmuted
+                                },
+                            },
+                        );
+                    }
+                }
+                self.state.mode = Mode::Terminal;
+            }
+            (
+                ContextMenuKind::Tab {
+                    ws_idx, tab_idx, ..
+                },
+                Some("Close"),
+            ) => {
                 self.focus_workspace_idx_via_api(ws_idx);
                 self.focus_tab_idx_via_api(tab_idx);
                 if !self.close_active_tab_via_api_requires_confirmation() {
@@ -1281,6 +1396,27 @@ impl App {
                         crate::api::schema::PaneRenameParams {
                             pane_id,
                             label: None,
+                        },
+                    );
+                }
+                self.state.mode = Mode::Terminal;
+            }
+            (
+                ContextMenuKind::Pane {
+                    ws_idx, pane_id, ..
+                },
+                Some(action @ ("Mute pane" | "Unmute pane")),
+            ) => {
+                if let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) {
+                    self.runtime_pane_mute_set(
+                        "tui.pane.mute.set",
+                        crate::api::schema::PaneMuteSetParams {
+                            pane_id,
+                            mode: if action == "Mute pane" {
+                                crate::api::schema::PaneMuteMode::Muted
+                            } else {
+                                crate::api::schema::PaneMuteMode::Unmuted
+                            },
                         },
                     );
                 }
@@ -2237,6 +2373,7 @@ mod tests {
                 source_pane_id: None,
                 has_manual_label: false,
                 right_click_passthrough: false,
+                muted: false,
             },
             x: 0,
             y: 0,
@@ -2255,6 +2392,95 @@ mod tests {
                 .unwrap()
                 .right_click_passthrough
         );
+    }
+
+    #[test]
+    fn tests_that_pane_context_menu_toggles_muting() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0]
+            .terminal_id(pane_id)
+            .unwrap()
+            .clone();
+        let menu = ContextMenuState {
+            kind: ContextMenuKind::Pane {
+                ws_idx: 0,
+                tab_idx: 0,
+                pane_id,
+                source_pane_id: None,
+                has_manual_label: false,
+                right_click_passthrough: false,
+                muted: false,
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        let mute_idx = menu
+            .items()
+            .iter()
+            .position(|item| *item == "Mute pane")
+            .expect("mute pane item");
+
+        app.apply_context_menu_action_via_api(menu, mute_idx);
+
+        assert!(app.state.terminals[&terminal_id].is_muted());
+        let menu = ContextMenuState {
+            kind: ContextMenuKind::Pane {
+                ws_idx: 0,
+                tab_idx: 0,
+                pane_id,
+                source_pane_id: None,
+                has_manual_label: false,
+                right_click_passthrough: false,
+                muted: true,
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        let unmute_idx = menu
+            .items()
+            .iter()
+            .position(|item| *item == "Unmute pane")
+            .expect("unmute pane item");
+
+        app.apply_context_menu_action_via_api(menu, unmute_idx);
+
+        assert!(!app.state.terminals[&terminal_id].is_muted());
+    }
+
+    #[test]
+    fn tests_that_tab_context_menu_mutes_every_pane() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        let terminal_ids = app.state.workspaces[0].tabs[0]
+            .panes
+            .values()
+            .map(|pane| pane.attached_terminal_id.clone())
+            .collect::<Vec<_>>();
+        let menu = ContextMenuState {
+            kind: ContextMenuKind::Tab {
+                ws_idx: 0,
+                tab_idx: 0,
+                muted: false,
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        let mute_idx = menu
+            .items()
+            .iter()
+            .position(|item| *item == "Mute tab")
+            .expect("mute tab item");
+
+        app.apply_context_menu_action_via_api(menu, mute_idx);
+
+        assert!(terminal_ids
+            .iter()
+            .all(|terminal_id| app.state.terminals[terminal_id].is_muted()));
     }
 
     #[test]
@@ -2285,6 +2511,7 @@ mod tests {
                 source_pane_id: None,
                 has_manual_label: false,
                 right_click_passthrough: false,
+                muted: false,
             },
             x: 0,
             y: 0,
@@ -2316,6 +2543,7 @@ mod tests {
             kind: ContextMenuKind::Tab {
                 ws_idx: 0,
                 tab_idx: 0,
+                muted: false,
             },
             x: 0,
             y: 0,
@@ -2351,6 +2579,7 @@ mod tests {
                 source_pane_id: None,
                 has_manual_label: false,
                 right_click_passthrough: false,
+                muted: false,
             },
             x: 0,
             y: 0,
