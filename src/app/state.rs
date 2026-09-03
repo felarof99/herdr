@@ -1253,6 +1253,7 @@ pub enum ContextMenuKind {
     Tab {
         ws_idx: usize,
         tab_idx: usize,
+        muted: bool,
     },
     Pane {
         ws_idx: usize,
@@ -1261,6 +1262,7 @@ pub enum ContextMenuKind {
         source_pane_id: Option<PaneId>,
         has_manual_label: bool,
         right_click_passthrough: bool,
+        muted: bool,
     },
 }
 
@@ -1297,11 +1299,17 @@ impl ContextMenuState {
                 "Open worktree...",
                 if collapsed { "Expand" } else { "Collapse" },
             ],
-            ContextMenuKind::Tab { .. } => vec!["New tab", "Rename", "Close"],
+            ContextMenuKind::Tab { muted, .. } => vec![
+                "New tab",
+                "Rename",
+                if muted { "Unmute tab" } else { "Mute tab" },
+                "Close",
+            ],
             ContextMenuKind::Pane {
                 source_pane_id,
                 has_manual_label,
                 right_click_passthrough,
+                muted,
                 ..
             } => {
                 let mut items = vec!["Rename pane"];
@@ -1317,6 +1325,7 @@ impl ContextMenuState {
                 } else {
                     "Send right-clicks to pane"
                 });
+                items.push(if muted { "Unmute pane" } else { "Mute pane" });
                 items.push("Close pane");
                 items
             }
@@ -2295,9 +2304,9 @@ impl AppState {
                 | ContextMenuKind::GitWorkspace { ws_idx, .. } => {
                     assert_workspace_index(ws_idx, "context menu workspace")
                 }
-                ContextMenuKind::Tab { ws_idx, tab_idx } => {
-                    assert_tab_index(ws_idx, tab_idx, "context menu tab")
-                }
+                ContextMenuKind::Tab {
+                    ws_idx, tab_idx, ..
+                } => assert_tab_index(ws_idx, tab_idx, "context menu tab"),
                 ContextMenuKind::Pane {
                     ws_idx,
                     tab_idx,

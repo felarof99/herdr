@@ -1089,8 +1089,24 @@ impl AppState {
                 if let (Some(ws_idx), Some(tab_idx)) =
                     (self.active, self.tab_at(mouse.column, mouse.row))
                 {
+                    let muted = self
+                        .workspaces
+                        .get(ws_idx)
+                        .and_then(|workspace| workspace.tabs.get(tab_idx))
+                        .is_some_and(|tab| {
+                            !tab.panes.is_empty()
+                                && tab.panes.values().all(|pane| {
+                                    self.terminals
+                                        .get(&pane.attached_terminal_id)
+                                        .is_some_and(crate::terminal::TerminalState::is_muted)
+                                })
+                        });
                     self.context_menu = Some(ContextMenuState {
-                        kind: ContextMenuKind::Tab { ws_idx, tab_idx },
+                        kind: ContextMenuKind::Tab {
+                            ws_idx,
+                            tab_idx,
+                            muted,
+                        },
                         x: mouse.column,
                         y: mouse.row,
                         list: MenuListState::new(0),
@@ -1122,6 +1138,9 @@ impl AppState {
                         .is_some();
                     let right_click_passthrough =
                         pane_state.is_some_and(|pane| pane.right_click_passthrough);
+                    let muted = pane_state
+                        .and_then(|pane| self.terminals.get(&pane.attached_terminal_id))
+                        .is_some_and(crate::terminal::TerminalState::is_muted);
                     self.context_menu = Some(ContextMenuState {
                         kind: ContextMenuKind::Pane {
                             ws_idx,
@@ -1130,6 +1149,7 @@ impl AppState {
                             source_pane_id,
                             has_manual_label,
                             right_click_passthrough,
+                            muted,
                         },
                         x: mouse.column,
                         y: mouse.row,
@@ -3663,6 +3683,7 @@ mod tests {
                 source_pane_id: None,
                 has_manual_label: false,
                 right_click_passthrough: false,
+                muted: false,
             },
             x: 2,
             y: 2,
@@ -4190,7 +4211,8 @@ mod tests {
             menu.kind,
             ContextMenuKind::Tab {
                 ws_idx: 0,
-                tab_idx: 1
+                tab_idx: 1,
+                muted: false,
             }
         );
         assert_eq!(app.state.mode, Mode::ContextMenu);
@@ -4215,6 +4237,15 @@ mod tests {
             second_tab.y,
         ));
 
+        let close_idx = app
+            .state
+            .context_menu
+            .as_ref()
+            .expect("tab context menu")
+            .items()
+            .iter()
+            .position(|item| *item == "Close")
+            .expect("close tab menu item");
         let menu = app
             .state
             .context_menu_rect()
@@ -4222,7 +4253,7 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             menu.x + 2,
-            menu.y + 3,
+            menu.y + 1 + close_idx as u16,
         ));
 
         assert_eq!(app.state.workspaces[0].tabs.len(), 1);

@@ -5,6 +5,9 @@ use crate::detect::AgentState;
 
 use super::{TerminalState, TerminalStateMutation};
 
+const MUTED_TOKEN: &str = "muted";
+const MUTED_TOKEN_VALUE: &str = "true";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentMetadata {
     pub source: String,
@@ -43,6 +46,11 @@ pub struct EffectivePresentation {
     pub state_labels: HashMap<String, String>,
 }
 
+enum MuteState {
+    Muted,
+    Unmuted,
+}
+
 impl EffectivePresentation {
     fn empty() -> Self {
         Self {
@@ -54,6 +62,37 @@ impl EffectivePresentation {
 }
 
 impl TerminalState {
+    pub(crate) fn is_muted(&self) -> bool {
+        self.muted
+    }
+
+    pub(crate) fn mute(&mut self) -> bool {
+        self.set_mute_state(MuteState::Muted)
+    }
+
+    pub(crate) fn unmute(&mut self) -> bool {
+        self.set_mute_state(MuteState::Unmuted)
+    }
+
+    fn set_mute_state(&mut self, state: MuteState) -> bool {
+        let (muted, token) = match state {
+            MuteState::Muted => (true, Some(MUTED_TOKEN_VALUE.to_string())),
+            MuteState::Unmuted => (false, None),
+        };
+        let state_changed = self.muted != muted;
+        self.muted = muted;
+        let token_changed = self.metadata_tokens.patch(
+            HashMap::from([(MUTED_TOKEN.to_string(), token)]),
+            None,
+            Instant::now(),
+        );
+        if state_changed || token_changed {
+            self.revision = self.revision.saturating_add(1);
+        }
+
+        state_changed || token_changed
+    }
+
     pub(crate) fn metadata_report_sequence_is_fresh(&self, source: &str, seq: Option<u64>) -> bool {
         crate::metadata_tokens::sequence_is_fresh(&self.metadata_report_sequences, source, seq)
     }
@@ -527,6 +566,28 @@ mod tests {
 
     fn test_terminal() -> TerminalState {
         TerminalState::new(TerminalId::alloc(), "/tmp".into())
+    }
+
+    #[test]
+    fn tests_that_muting_sets_the_token_and_unmuting_clears_it() {
+        let mut terminal = test_terminal();
+
+        terminal.mute();
+
+        assert!(terminal.is_muted());
+        assert_eq!(
+            terminal
+                .metadata_tokens
+                .values()
+                .get(MUTED_TOKEN)
+                .map(String::as_str),
+            Some(MUTED_TOKEN_VALUE)
+        );
+
+        terminal.unmute();
+
+        assert!(!terminal.is_muted());
+        assert!(!terminal.metadata_tokens.values().contains_key(MUTED_TOKEN));
     }
 
     #[test]

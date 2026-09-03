@@ -491,6 +491,7 @@ fn restore_tab(
         };
 
         let saved_label = saved_pane.and_then(|p| p.label.clone());
+        let saved_muted = saved_pane.is_some_and(|pane| pane.muted);
         let saved_agent_name = saved_pane.and_then(|p| p.agent_name.clone());
         let saved_managed_agent = saved_pane
             .and_then(|pane| pane.managed_agent_kind.as_deref())
@@ -539,6 +540,9 @@ fn restore_tab(
                 .with_pending_agent_resume_plan(plan);
             if let Some(label) = saved_label {
                 terminal.set_manual_label(label);
+            }
+            if saved_muted {
+                terminal.mute();
             }
             if let Some(session) = restored_agent_session {
                 terminal.set_persisted_agent_session(session);
@@ -636,6 +640,9 @@ fn restore_tab(
                 }
                 if let Some(label) = saved_label {
                     terminal.set_manual_label(label);
+                }
+                if saved_muted {
+                    terminal.mute();
                 }
                 if let Some(session) = restored_agent_session {
                     terminal.set_persisted_agent_session(session);
@@ -1189,6 +1196,7 @@ mod tests {
                         super::super::snapshot::PaneSnapshot {
                             cwd,
                             label: Some("reviewer".into()),
+                            muted: false,
                             agent_name: Some("reviewer".into()),
                             managed_agent_kind: Some("opencode".into()),
                             agent_session: Some(super::super::snapshot::PaneAgentSessionSnapshot {
@@ -1275,6 +1283,7 @@ mod tests {
                             super::super::snapshot::PaneSnapshot {
                                 cwd: cwd.clone(),
                                 label: None,
+                                muted: false,
                                 agent_name: None,
                                 managed_agent_kind: None,
                                 agent_session: None,
@@ -1286,6 +1295,7 @@ mod tests {
                             super::super::snapshot::PaneSnapshot {
                                 cwd: cwd.clone(),
                                 label: None,
+                                muted: false,
                                 agent_name: None,
                                 managed_agent_kind: None,
                                 agent_session: None,
@@ -1339,6 +1349,7 @@ mod tests {
                 super::super::snapshot::PaneSnapshot {
                     cwd: cwd.clone(),
                     label: None,
+                    muted: false,
                     agent_name: None,
                     managed_agent_kind: None,
                     agent_session: None,
@@ -1349,6 +1360,7 @@ mod tests {
         let final_pane = super::super::snapshot::PaneSnapshot {
             cwd: cwd.clone(),
             label: Some("planner".into()),
+            muted: false,
             agent_name: Some("planner".into()),
             managed_agent_kind: None,
             agent_session: Some(super::super::snapshot::PaneAgentSessionSnapshot {
@@ -1500,6 +1512,7 @@ mod tests {
                         super::super::snapshot::PaneSnapshot {
                             cwd,
                             label: None,
+                            muted: false,
                             agent_name: None,
                             managed_agent_kind: None,
                             agent_session: Some(super::super::snapshot::PaneAgentSessionSnapshot {
@@ -1658,6 +1671,46 @@ mod tests {
         let _ = runtime.try_send_bytes(bytes::Bytes::from_static(b"exit\n"));
     }
 
+    #[tokio::test]
+    async fn tests_that_restore_rehydrates_muted_pane_metadata() {
+        let (mut snapshot, _) = snapshot_with_saved_pane_history();
+        snapshot.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&0)
+            .unwrap()
+            .muted = true;
+        let (events, _events_rx) = mpsc::channel(8);
+
+        let (_workspaces, terminals, runtimes) = restore(
+            &snapshot,
+            None,
+            5,
+            40,
+            4096,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+        let terminal = terminals.values().next().expect("restored terminal");
+
+        assert!(terminal.is_muted());
+        assert_eq!(
+            terminal
+                .metadata_tokens
+                .values()
+                .get("muted")
+                .map(String::as_str),
+            Some("true")
+        );
+
+        for runtime in runtimes.values() {
+            let _ = runtime.try_send_bytes(bytes::Bytes::from_static(b"exit\n"));
+        }
+    }
+
     fn snapshot_with_saved_pane_history() -> (SessionSnapshot, SessionHistorySnapshot) {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
         let mut panes = HashMap::new();
@@ -1666,6 +1719,7 @@ mod tests {
             super::super::snapshot::PaneSnapshot {
                 cwd: cwd.clone(),
                 label: None,
+                muted: false,
                 agent_name: None,
                 managed_agent_kind: None,
                 agent_session: None,
