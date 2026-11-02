@@ -229,7 +229,11 @@ fn lock_directory(file: &fs::File) -> io::Result<()> {
 }
 
 fn create_generation(root: &Path, now: SystemTime) -> io::Result<Generation> {
-    let parent = root.join(format!("herdr-kitty-files-{}", effective_uid()));
+    let parent = root.join(format!(
+        "{}-kitty-files-{}",
+        crate::app_identity::APP_NAME,
+        effective_uid()
+    ));
     match DirBuilder::new().mode(0o700).create(&parent) {
         Ok(()) => fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))?,
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}

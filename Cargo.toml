@@ -20,6 +20,14 @@ include = [
     "Cargo.toml",
 ]
 
+[features]
+fork = []
+
+[[bin]]
+name = "herdr-fork"
+path = "src/herdr_fork.rs"
+required-features = ["fork"]
+
 [workspace]
 members = ["crates/ghostty-vt"]
 default-members = [".", "crates/ghostty-vt"]

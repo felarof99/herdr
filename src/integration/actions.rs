@@ -13,9 +13,24 @@ use super::targets::{
 use super::version::{agent_version_requirement, enforce_agent_version};
 use super::{KIMI_MIN_VERSION, PI_EXTENSION_INSTALL_NAME};
 
+/// Agent integrations live in each agent's own config, shared with an
+/// installed herdr. herdr-fork leaves them to herdr; the hooks herdr installs
+/// read the pane environment, so they report to herdr-fork in its panes too.
+fn refuse_shared_integration_write() -> io::Result<()> {
+    if !crate::app_identity::IS_FORK {
+        return Ok(());
+    }
+    Err(io::Error::other(format!(
+        "{} does not install or remove agent integrations, because they are shared with herdr; run `herdr integration install <agent>` instead, and the hooks work in {} panes too",
+        crate::app_identity::APP_NAME,
+        crate::app_identity::APP_NAME
+    )))
+}
+
 pub(crate) fn install_target(
     target: crate::api::schema::IntegrationTarget,
 ) -> io::Result<Vec<String>> {
+    refuse_shared_integration_write()?;
     let result = install_target_inner(target);
     let outcome = if result.is_ok() { "ok" } else { "error" };
     crate::logging::integration_action("install", integration_target_label(target), outcome);
@@ -25,6 +40,7 @@ pub(crate) fn install_target(
 /// Experimental Letta install that bypasses the frozen client endpoint
 /// `IntegrationTarget` enum. Fold into the agent registry when it lands.
 pub(crate) fn install_experimental_letta() -> io::Result<Vec<String>> {
+    refuse_shared_integration_write()?;
     let result = install_letta().map(|installed| {
         vec![
             format!(
@@ -44,6 +60,7 @@ pub(crate) fn install_experimental_letta() -> io::Result<Vec<String>> {
 
 /// Experimental Letta uninstall counterpart.
 pub(crate) fn uninstall_experimental_letta() -> io::Result<Vec<String>> {
+    refuse_shared_integration_write()?;
     let result = uninstall_letta().map(|result| {
         let mut messages = Vec::new();
         if result.removed_hook_file {
@@ -326,6 +343,7 @@ fn install_target_inner(target: crate::api::schema::IntegrationTarget) -> io::Re
 pub(crate) fn uninstall_target(
     target: crate::api::schema::IntegrationTarget,
 ) -> io::Result<Vec<String>> {
+    refuse_shared_integration_write()?;
     let messages = match target {
         crate::api::schema::IntegrationTarget::Pi => {
             let result = uninstall_pi()?;

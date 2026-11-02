@@ -1190,7 +1190,7 @@ impl Default for KeysConfig {
 impl Default for WorktreesConfig {
     fn default() -> Self {
         Self {
-            directory: "~/.herdr/worktrees".into(),
+            directory: crate::app_identity::DEFAULT_WORKTREES_DIR.into(),
         }
     }
 }
