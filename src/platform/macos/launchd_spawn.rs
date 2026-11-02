@@ -18,7 +18,11 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const LAUNCHCTL: &str = "/bin/launchctl";
-const LABEL_PREFIX: &str = "dev.herdr.server.";
+const LABEL_PREFIX: &str = if crate::app_identity::IS_FORK {
+    "dev.herdr-fork.server."
+} else {
+    "dev.herdr.server."
+};
 /// Tells the job process to fork the server and exit; never inherited by panes.
 const DETACH_ENV: &str = "HERDR_LAUNCHD_DETACH";
 /// Finished jobs stay loaded until logout; older ones are removed on the next launch.

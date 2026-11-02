@@ -28,6 +28,16 @@ pub(crate) const OPENCODE_CONFIG_DIR_ENV_VAR: &str = "OPENCODE_CONFIG_DIR";
 
 pub(crate) fn apply_pane_base_env(cmd: &mut CommandBuilder) {
     cmd.env(crate::api::SOCKET_PATH_ENV_VAR, crate::api::socket_path());
+    if crate::app_identity::IS_FORK {
+        cmd.env(
+            crate::app_identity::SHARED_HOOK_SOCKET_PATH_ENV_VAR,
+            crate::api::socket_path(),
+        );
+        cmd.env(
+            crate::app_identity::SHARED_HOOK_ENV_MARKER_VAR,
+            crate::HERDR_ENV_VALUE,
+        );
+    }
     if let Ok(executable) = crate::platform::launch_executable() {
         cmd.env("HERDR_BIN_PATH", executable);
     }

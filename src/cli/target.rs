@@ -208,6 +208,9 @@ pub(super) fn caller_pane_id() -> Option<String> {
     if is_remote() {
         return None;
     }
+    if crate::app_identity::IS_FORK && std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR).is_none() {
+        return None;
+    }
     std::env::var("HERDR_PANE_ID")
         .ok()
         .filter(|value| !value.trim().is_empty())

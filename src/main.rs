@@ -1,6 +1,6 @@
 use std::io;
 
-pub(crate) const HERDR_ENV_VAR: &str = "HERDR_ENV";
+pub(crate) const HERDR_ENV_VAR: &str = app_identity::ENV_MARKER_VAR;
 pub(crate) const HERDR_ENV_VALUE: &str = "1";
 const NESTED_HERDR_MESSAGES: [&str; 6] = [
     "inception detected. we need to go deeper... said no one ever.",
@@ -15,6 +15,7 @@ mod agent_resume;
 mod agent_view_eval;
 mod api;
 mod app;
+mod app_identity;
 mod build_info;
 mod checksum;
 mod cli;
@@ -724,7 +725,11 @@ fn main() -> io::Result<()> {
 
     if args.iter().any(|a| a == "--version" || a == "-V") {
         platform::begin_cli_output();
-        println!("herdr {}", crate::build_info::version());
+        println!(
+            "{} {}",
+            app_identity::APP_NAME,
+            crate::build_info::version()
+        );
         return Ok(());
     }
 
