@@ -1,11 +1,11 @@
 use crate::api::schema::{
-    AgentViewFilter, AgentViewSetParams, AgentViewSort, InstalledPluginInfo, PluginManifestAction,
-    PluginManifestAgentView, PluginManifestBuild, PluginManifestEventHook,
+    InstalledPluginInfo, PluginManifestAction, PluginManifestBuild, PluginManifestEventHook,
     PluginManifestLinkHandler, PluginManifestPane, PluginManifestStartup, PluginPanePlacement,
     PluginPlatform, PluginSourceInfo, PluginSourceKind,
 };
 use crate::popup_size::PopupSize;
 
+const PLUGIN_ID_MAX_CHARS: usize = 120;
 const PLUGIN_ACTION_ID_MAX_CHARS: usize = 120;
 
 #[derive(serde::Deserialize)]
@@ -29,8 +29,6 @@ struct RawPluginManifest {
     events: Vec<RawPluginManifestEventHook>,
     #[serde(default)]
     panes: Vec<RawPluginManifestPane>,
-    #[serde(default)]
-    agent_views: Vec<RawPluginManifestAgentView>,
     #[serde(default)]
     link_handlers: Vec<RawPluginManifestLinkHandler>,
 }
@@ -88,14 +86,6 @@ struct RawPluginManifestPane {
 }
 
 #[derive(serde::Deserialize)]
-struct RawPluginManifestAgentView {
-    id: String,
-    label: String,
-    filter: AgentViewFilter,
-    sort: Vec<AgentViewSort>,
-}
-
-#[derive(serde::Deserialize)]
 struct RawPluginManifestLinkHandler {
     id: String,
     title: String,
@@ -138,15 +128,13 @@ pub(crate) fn load_plugin_manifest(
     let manifest_path = manifest_path
         .canonicalize()
         .map_err(|err| ("plugin_manifest_not_found", err.to_string()))?;
-    let plugin_root = manifest_path
-        .parent()
-        .ok_or_else(|| {
+    let plugin_root =
+        crate::platform::plugin_runtime_path(manifest_path.parent().ok_or_else(|| {
             (
                 "invalid_plugin_manifest_path",
                 "manifest path has no parent directory".to_string(),
             )
-        })?
-        .to_path_buf();
+        })?);
     let content = std::fs::read_to_string(&manifest_path)
         .map_err(|err| ("plugin_manifest_read_failed", err.to_string()))?;
     let raw: RawPluginManifest = toml::from_str(&content)
@@ -202,13 +190,6 @@ pub(crate) fn load_plugin_manifest(
         .collect::<Result<Vec<_>, _>>()?;
     reject_duplicate_pane_ids(&panes)?;
     panes.sort_by(|a, b| a.id.cmp(&b.id));
-    let mut agent_views = raw
-        .agent_views
-        .into_iter()
-        .map(|view| normalize_manifest_agent_view(&plugin_id, view))
-        .collect::<Result<Vec<_>, _>>()?;
-    reject_duplicate_agent_view_ids(&agent_views)?;
-    agent_views.sort_by(|a, b| a.id.cmp(&b.id));
     let link_handlers = raw
         .link_handlers
         .into_iter()
@@ -237,7 +218,6 @@ pub(crate) fn load_plugin_manifest(
         actions,
         events,
         panes,
-        agent_views,
         link_handlers,
         source: Default::default(),
         warnings,
@@ -310,10 +290,19 @@ pub(super) fn normalize_plugin_source(
     let plugin_root = std::path::PathBuf::from(&plugin.plugin_root)
         .canonicalize()
         .map_err(|err| ("invalid_plugin_source", err.to_string()))?;
-    let expected = crate::plugin_paths::managed_checkout_path(&plugin.plugin_id)
-        .canonicalize()
-        .map_err(|err| ("invalid_plugin_source", err.to_string()))?;
-    if managed_path != expected {
+    let legacy = crate::plugin_paths::managed_checkout_path(&plugin.plugin_id).canonicalize();
+    let installations =
+        crate::plugin_paths::managed_installations_dir(&plugin.plugin_id).canonicalize();
+    let is_installation = installations.as_ref().is_ok_and(|root| {
+        managed_path
+            .file_name()
+            .is_some_and(|name| name == "checkout")
+            && managed_path
+                .parent()
+                .and_then(|generation| generation.parent())
+                == Some(root.as_path())
+    });
+    if !is_installation && !legacy.as_ref().is_ok_and(|path| path == &managed_path) {
         return Err((
             "invalid_plugin_source",
             "GitHub plugin managed_path does not match the plugin id".to_string(),
@@ -359,21 +348,6 @@ fn reject_duplicate_pane_ids(panes: &[PluginManifestPane]) -> Result<(), (&'stat
             return Err((
                 "duplicate_plugin_pane_id",
                 format!("duplicate pane id '{}'", pane.id),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn reject_duplicate_agent_view_ids(
-    views: &[PluginManifestAgentView],
-) -> Result<(), (&'static str, String)> {
-    let mut seen = std::collections::HashSet::new();
-    for view in views {
-        if !seen.insert(view.id.as_str()) {
-            return Err((
-                "duplicate_plugin_agent_view_id",
-                format!("duplicate agent view id '{}'", view.id),
             ));
         }
     }
@@ -472,48 +446,6 @@ fn normalize_manifest_pane(
         width: pane.width,
         height: pane.height,
         command,
-    })
-}
-
-fn normalize_manifest_agent_view(
-    plugin_id: &str,
-    view: RawPluginManifestAgentView,
-) -> Result<PluginManifestAgentView, (&'static str, String)> {
-    let id = normalize_action_id(&view.id).ok_or_else(|| {
-        (
-            "invalid_plugin_agent_view_id",
-            "invalid agent view id".to_string(),
-        )
-    })?;
-    let mut spec = AgentViewSetParams {
-        source: format!("plugin:{plugin_id}"),
-        label: Some(view.label),
-        filter: Some(view.filter),
-        sort: view.sort,
-    };
-    crate::app::agent_view::validate_agent_view(&mut spec).map_err(|message| {
-        (
-            "invalid_plugin_agent_view",
-            format!("invalid agent view '{id}': {message}"),
-        )
-    })?;
-    let AgentViewSetParams {
-        label: Some(label),
-        filter: Some(filter),
-        sort,
-        ..
-    } = spec
-    else {
-        return Err((
-            "invalid_plugin_agent_view",
-            format!("invalid agent view '{id}'"),
-        ));
-    };
-    Ok(PluginManifestAgentView {
-        id,
-        label,
-        filter,
-        sort,
     })
 }
 
@@ -657,7 +589,7 @@ fn non_empty_trimmed(
 }
 
 pub(crate) fn normalize_plugin_id(value: &str) -> Option<String> {
-    normalize_identifier(value, crate::api::schema::plugins::PLUGIN_ID_MAX_CHARS)
+    normalize_identifier(value, PLUGIN_ID_MAX_CHARS)
 }
 
 pub(super) fn normalize_action_id(value: &str) -> Option<String> {

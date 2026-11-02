@@ -1,95 +1,98 @@
+use std::time::{Duration, Instant};
+
 use super::App;
+use crate::terminal_theme::HostAppearance;
+
+#[cfg(test)]
+mod tests;
 
 impl App {
-    #[cfg(not(windows))]
-    pub(super) fn query_host_terminal_appearance(&self) {
-        use std::io::Write;
-
-        let _ = std::io::stdout()
-            .write_all(crate::terminal_theme::HOST_COLOR_SCHEME_QUERY_SEQUENCE.as_bytes());
-        let _ = std::io::stdout().flush();
-    }
-
-    pub(super) fn query_host_terminal_theme(&self) {
-        use std::io::Write;
-
-        let query = crate::terminal_theme::host_terminal_theme_query_sequence(
-            crate::platform::should_query_host_terminal_palette(),
-        );
-        let _ = std::io::stdout().write_all(query.as_bytes());
-        let _ = std::io::stdout().flush();
-    }
-
-    pub(super) fn update_host_terminal_theme(
-        &mut self,
-        kind: crate::terminal_theme::DefaultColorKind,
-        color: crate::terminal_theme::RgbColor,
-    ) -> bool {
-        let mut changed = false;
-        if matches!(kind, crate::terminal_theme::DefaultColorKind::Background)
-            && !self.state.host_terminal_appearance_explicit
-        {
-            changed |= self.set_host_terminal_appearance(color.inferred_appearance(), false);
-        }
-        let next_theme = self.state.host_terminal_theme.with_color(kind, color);
-        changed | self.set_host_terminal_theme(next_theme)
-    }
-
-    pub(super) fn update_host_terminal_palette_colors(
-        &mut self,
-        colors: &[(u8, crate::terminal_theme::RgbColor)],
-    ) -> bool {
-        let mut next_theme = self.state.host_terminal_theme;
-        for &(index, color) in colors {
-            next_theme = next_theme.with_palette_color(index, color);
-        }
-        self.set_host_terminal_theme(next_theme)
-    }
-
-    pub(super) fn set_host_terminal_appearance(
-        &mut self,
-        appearance: crate::terminal_theme::HostAppearance,
-        explicit: bool,
-    ) -> bool {
-        if self.state.host_terminal_appearance == Some(appearance)
-            && self.state.host_terminal_appearance_explicit == explicit
-        {
-            return false;
-        }
-        if self.state.host_terminal_appearance_explicit && !explicit {
-            return false;
-        }
-        self.state.host_terminal_appearance = Some(appearance);
-        self.state.host_terminal_appearance_explicit = explicit;
-        self.apply_host_terminal_appearance_to_panes();
-        self.refresh_effective_app_theme()
-    }
-
+    #[cfg(test)]
     pub(crate) fn set_host_terminal_appearance_state(
         &mut self,
-        appearance: Option<crate::terminal_theme::HostAppearance>,
+        appearance: Option<HostAppearance>,
         explicit: bool,
     ) -> bool {
-        if self.state.host_terminal_appearance == appearance
-            && self.state.host_terminal_appearance_explicit == explicit
-        {
-            return false;
-        }
-        self.state.host_terminal_appearance = appearance;
-        self.state.host_terminal_appearance_explicit = explicit;
-        self.apply_host_terminal_appearance_to_panes();
-        self.refresh_effective_app_theme()
+        self.set_host_terminal_state(self.state.host_terminal_theme, appearance, explicit)
     }
 
+    #[cfg(test)]
     pub(crate) fn set_host_terminal_theme(
         &mut self,
         theme: crate::terminal_theme::TerminalTheme,
     ) -> bool {
-        if theme == self.state.host_terminal_theme {
+        self.set_host_terminal_state(
+            theme,
+            self.state.host_terminal_appearance,
+            self.state.host_terminal_appearance_explicit,
+        )
+    }
+
+    pub(crate) fn set_host_terminal_state(
+        &mut self,
+        theme: crate::terminal_theme::TerminalTheme,
+        appearance: Option<HostAppearance>,
+        explicit: bool,
+    ) -> bool {
+        let theme_changed = theme != self.state.host_terminal_theme;
+        if theme_changed {
+            self.state.host_terminal_theme = theme;
+            self.apply_host_terminal_theme_to_panes();
+        }
+
+        let previous = self.state.host_terminal_appearance;
+        let appearance_changed =
+            previous != appearance || self.state.host_terminal_appearance_explicit != explicit;
+        if appearance_changed {
+            self.state.host_terminal_appearance = appearance;
+            self.state.host_terminal_appearance_explicit = explicit;
+            if previous.is_some() && appearance.is_some() {
+                if previous != appearance {
+                    // The matching OSC 11 arrives after the appearance report's round trip.
+                    self.pending_host_appearance_deadline
+                        .get_or_insert(Instant::now() + Duration::from_millis(750));
+                }
+            } else {
+                self.pending_host_appearance_deadline = None;
+                self.apply_host_terminal_appearance_to_panes();
+            }
+        }
+
+        // A foreground switch must install both facts before releasing the outgoing hold.
+        let released = self.release_host_appearance_if_ready(Instant::now());
+        let repainted = appearance_changed && self.refresh_effective_app_theme();
+        theme_changed || released || repainted
+    }
+
+    pub(crate) fn pane_host_terminal_appearance(&self) -> Option<HostAppearance> {
+        if self.pending_host_appearance_deadline.is_some() {
+            // New panes must describe the background available during the hold.
+            self.state
+                .host_terminal_theme
+                .background
+                .map(|color| color.inferred_appearance())
+                .or(self.pane_host_appearance)
+        } else {
+            self.state.host_terminal_appearance
+        }
+    }
+
+    pub(crate) fn release_host_appearance_if_ready(&mut self, now: Instant) -> bool {
+        let Some(deadline) = self.pending_host_appearance_deadline else {
+            return false;
+        };
+        let matches = self
+            .state
+            .host_terminal_theme
+            .background
+            .is_some_and(|color| {
+                Some(color.inferred_appearance()) == self.state.host_terminal_appearance
+            });
+        if !matches && now < deadline {
             return false;
         }
-        self.state.host_terminal_theme = theme;
-        self.apply_host_terminal_theme_to_panes();
+        self.pending_host_appearance_deadline = None;
+        self.apply_host_terminal_appearance_to_panes();
         true
     }
 
@@ -108,7 +111,8 @@ impl App {
         true
     }
 
-    fn apply_host_terminal_appearance_to_panes(&self) {
+    fn apply_host_terminal_appearance_to_panes(&mut self) {
+        self.pane_host_appearance = self.state.host_terminal_appearance;
         for runtime in self.terminal_runtimes.values() {
             runtime.apply_host_terminal_appearance(self.state.host_terminal_appearance);
         }
