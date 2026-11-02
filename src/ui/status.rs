@@ -9,7 +9,7 @@ use ratatui::{
 use super::text::display_width_u16;
 use super::widgets::panel_contrast_fg;
 use crate::{
-    app::state::{CopyFeedback, Palette, StatusColors, ToastKind, ToastNotification},
+    app::state::{CopyFeedback, Palette, ToastKind, ToastNotification},
     config::{StatusIndicatorStyle, ToastClipboardPosition, ToastHerdrPosition},
     detect::AgentState,
 };
@@ -85,10 +85,13 @@ pub(super) fn render_toast_notification(
     toast: &ToastNotification,
     offset_for_warning: bool,
     position: ToastHerdrPosition,
-    status_colors: &StatusColors,
     p: &Palette,
 ) {
-    let dot_color = toast_dot_color(toast.kind, status_colors, p);
+    let dot_color = match toast.kind {
+        ToastKind::NeedsAttention => p.red,
+        ToastKind::Finished => p.blue,
+        ToastKind::UpdateInstalled => p.accent,
+    };
     let toast_area = toast_notification_rect(area, toast, offset_for_warning, position);
 
     frame.render_widget(Clear, toast_area);
@@ -213,12 +216,11 @@ pub(super) fn state_icon(
     state: AgentState,
     seen: bool,
     indicator_style: StatusIndicatorStyle,
-    status_colors: &StatusColors,
     p: &Palette,
 ) -> (&'static str, Style) {
     (
         state_icon_symbol(state, seen, indicator_style),
-        Style::default().fg(state_label_color(state, seen, status_colors, p)),
+        Style::default().fg(state_label_color(state, seen, p)),
     )
 }
 
@@ -232,37 +234,13 @@ pub(super) fn state_label(state: AgentState, seen: bool) -> &'static str {
     }
 }
 
-/// Color for a state's status icon and matching status text.
-///
-/// `[ui.status_colors]` overrides win; every unset slot keeps the theme color it
-/// has always used, so an absent table renders exactly as before.
-pub(super) fn state_label_color(
-    state: AgentState,
-    seen: bool,
-    status_colors: &StatusColors,
-    p: &Palette,
-) -> Color {
-    let default = match (state, seen) {
+pub(super) fn state_label_color(state: AgentState, seen: bool, p: &Palette) -> Color {
+    match (state, seen) {
         (AgentState::Blocked, _) => p.red,
         (AgentState::Working, _) => p.yellow,
         (AgentState::Idle, false) => p.teal,
         (AgentState::Idle, true) => p.green,
         (AgentState::Unknown, _) => p.overlay0,
-    };
-    status_colors.for_state(state, seen).unwrap_or(default)
-}
-
-/// Dot color for a toast, following the state it announces.
-///
-/// A needs-attention toast is a blocked agent and a finished toast is a done
-/// one, so a configured `blocked` or `done` color carries over to the dot.
-/// Unset slots keep the colors toasts have always used, which are not the
-/// sidebar's defaults: finished is the theme's blue, not its teal.
-pub(super) fn toast_dot_color(kind: ToastKind, status_colors: &StatusColors, p: &Palette) -> Color {
-    match kind {
-        ToastKind::NeedsAttention => status_colors.blocked.unwrap_or(p.red),
-        ToastKind::Finished => status_colors.done.unwrap_or(p.blue),
-        ToastKind::UpdateInstalled => p.accent,
     }
 }
 
@@ -290,7 +268,6 @@ mod tests {
     #[test]
     fn state_icons_support_dot_and_distinct_symbol_styles() {
         let palette = Palette::catppuccin();
-        let status_colors = StatusColors::default();
         for (indicator_style, expected_symbols) in [
             (StatusIndicatorStyle::Dots, ["●", "●", "●", "○", "·"]),
             (StatusIndicatorStyle::Symbols, ["×", "◐", "✓", "○", "·"]),
@@ -305,207 +282,12 @@ mod tests {
             .into_iter()
             .zip(expected_symbols)
             {
-                let (actual_symbol, style) =
-                    state_icon(state, seen, indicator_style, &status_colors, &palette);
+                let (actual_symbol, style) = state_icon(state, seen, indicator_style, &palette);
                 assert_eq!(actual_symbol, expected_symbol);
                 assert_eq!(display_width_u16(actual_symbol), 1);
                 assert_eq!(style.fg, Some(color));
             }
         }
-    }
-
-    /// Every state, in every built-in theme, keeps the palette color it had
-    /// before `[ui.status_colors]` existed when the table is absent.
-    #[test]
-    fn absent_status_colors_preserve_theme_defaults() {
-        let status_colors = StatusColors::default();
-        for name in crate::config::THEME_NAMES {
-            let palette = Palette::from_name(name).expect("built-in theme");
-            for (state, seen, expected) in [
-                (AgentState::Blocked, true, palette.red),
-                (AgentState::Blocked, false, palette.red),
-                (AgentState::Working, true, palette.yellow),
-                (AgentState::Working, false, palette.yellow),
-                (AgentState::Idle, false, palette.teal),
-                (AgentState::Idle, true, palette.green),
-                (AgentState::Unknown, true, palette.overlay0),
-                (AgentState::Unknown, false, palette.overlay0),
-            ] {
-                assert_eq!(
-                    state_label_color(state, seen, &status_colors, &palette),
-                    expected,
-                    "{name}: {state:?} seen={seen}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn configured_status_colors_override_matching_states_only() {
-        let palette = Palette::catppuccin();
-        let blue = Color::Rgb(0x71, 0xb7, 0xff);
-        let yellow = Color::Rgb(0xff, 0xd6, 0x0a);
-        let status_colors = StatusColors {
-            working: Some(blue),
-            blocked: Some(yellow),
-            ..StatusColors::default()
-        };
-
-        // The requested mapping: blue for running, yellow for waiting on you.
-        assert_eq!(
-            state_label_color(AgentState::Working, true, &status_colors, &palette),
-            blue
-        );
-        assert_eq!(
-            state_label_color(AgentState::Blocked, true, &status_colors, &palette),
-            yellow
-        );
-
-        // Unset slots still come from the palette.
-        assert_eq!(
-            state_label_color(AgentState::Idle, false, &status_colors, &palette),
-            palette.teal
-        );
-        assert_eq!(
-            state_label_color(AgentState::Idle, true, &status_colors, &palette),
-            palette.green
-        );
-        assert_eq!(
-            state_label_color(AgentState::Unknown, true, &status_colors, &palette),
-            palette.overlay0
-        );
-    }
-
-    #[test]
-    fn every_status_slot_is_independently_configurable() {
-        let palette = Palette::catppuccin();
-        let cases = [
-            (
-                AgentState::Working,
-                true,
-                StatusColors {
-                    working: Some(Color::Rgb(1, 0, 0)),
-                    ..StatusColors::default()
-                },
-                Color::Rgb(1, 0, 0),
-            ),
-            (
-                AgentState::Blocked,
-                true,
-                StatusColors {
-                    blocked: Some(Color::Rgb(2, 0, 0)),
-                    ..StatusColors::default()
-                },
-                Color::Rgb(2, 0, 0),
-            ),
-            (
-                AgentState::Idle,
-                false,
-                StatusColors {
-                    done: Some(Color::Rgb(3, 0, 0)),
-                    ..StatusColors::default()
-                },
-                Color::Rgb(3, 0, 0),
-            ),
-            (
-                AgentState::Idle,
-                true,
-                StatusColors {
-                    idle: Some(Color::Rgb(4, 0, 0)),
-                    ..StatusColors::default()
-                },
-                Color::Rgb(4, 0, 0),
-            ),
-            (
-                AgentState::Unknown,
-                true,
-                StatusColors {
-                    unknown: Some(Color::Rgb(5, 0, 0)),
-                    ..StatusColors::default()
-                },
-                Color::Rgb(5, 0, 0),
-            ),
-        ];
-
-        for (state, seen, status_colors, expected) in cases {
-            assert_eq!(
-                state_label_color(state, seen, &status_colors, &palette),
-                expected,
-                "{state:?} seen={seen}"
-            );
-            let (_, style) = state_icon(
-                state,
-                seen,
-                StatusIndicatorStyle::Dots,
-                &status_colors,
-                &palette,
-            );
-            assert_eq!(style.fg, Some(expected), "icon {state:?} seen={seen}");
-        }
-    }
-
-    #[test]
-    fn resolved_status_colors_come_from_config() {
-        let config: crate::config::Config = toml::from_str(
-            r##"
-[ui.status_colors]
-working = "#71b7ff"
-blocked = "#ffd60a"
-"##,
-        )
-        .unwrap();
-
-        let status_colors = StatusColors::from_config(&config.ui.status_colors);
-        assert_eq!(status_colors.working, Some(Color::Rgb(0x71, 0xb7, 0xff)));
-        assert_eq!(status_colors.blocked, Some(Color::Rgb(0xff, 0xd6, 0x0a)));
-        assert_eq!(status_colors.done, None);
-        assert_eq!(status_colors.idle, None);
-        assert_eq!(status_colors.unknown, None);
-
-        let empty: crate::config::Config = toml::from_str("").unwrap();
-        assert_eq!(
-            StatusColors::from_config(&empty.ui.status_colors),
-            StatusColors::default()
-        );
-    }
-
-    #[test]
-    fn toast_dots_follow_configured_blocked_and_done_colors() {
-        let palette = Palette::catppuccin();
-        let unset = StatusColors::default();
-        assert_eq!(
-            toast_dot_color(ToastKind::NeedsAttention, &unset, &palette),
-            palette.red
-        );
-        assert_eq!(
-            toast_dot_color(ToastKind::Finished, &unset, &palette),
-            palette.blue
-        );
-        assert_eq!(
-            toast_dot_color(ToastKind::UpdateInstalled, &unset, &palette),
-            palette.accent
-        );
-
-        let configured = StatusColors {
-            blocked: Some(Color::Rgb(1, 2, 3)),
-            done: Some(Color::Rgb(4, 5, 6)),
-            // Working and idle never announce a toast, so they must not leak in.
-            working: Some(Color::Rgb(7, 8, 9)),
-            idle: Some(Color::Rgb(10, 11, 12)),
-            ..StatusColors::default()
-        };
-        assert_eq!(
-            toast_dot_color(ToastKind::NeedsAttention, &configured, &palette),
-            Color::Rgb(1, 2, 3)
-        );
-        assert_eq!(
-            toast_dot_color(ToastKind::Finished, &configured, &palette),
-            Color::Rgb(4, 5, 6)
-        );
-        assert_eq!(
-            toast_dot_color(ToastKind::UpdateInstalled, &configured, &palette),
-            palette.accent
-        );
     }
 
     #[test]

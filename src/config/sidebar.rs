@@ -7,11 +7,6 @@ use crate::detect::Agent;
 const MAX_SIDEBAR_ROWS: usize = 16;
 const MAX_SIDEBAR_TOKENS_PER_ROW: usize = 16;
 const DEFAULT_SIDEBAR_ROW_GAP: u16 = 0;
-/// One display line per configured row: rows truncate rather than wrap.
-const DEFAULT_SIDEBAR_WRAP: u16 = 1;
-/// A wrapped row is still one field in a list; past a few lines it stops
-/// reading as one and starts crowding out the entries below it.
-const MAX_SIDEBAR_WRAP: u16 = 4;
 
 fn deserialize_sidebar_rows<'de, D, T>(deserializer: D) -> Result<Vec<Vec<T>>, D::Error>
 where
@@ -382,25 +377,6 @@ pub struct AgentsSidebarConfig {
     #[serde(default, deserialize_with = "deserialize_rows_by_agent")]
     pub rows_by_agent: BTreeMap<String, AgentSidebarRows>,
     pub row_gap: u16,
-    /// Display lines a single configured row may occupy. 1 truncates, which is
-    /// the default; above that a row too wide for the panel wraps onto up to
-    /// this many lines. Only rows holding exactly one text token wrap — see
-    /// `wrapped_agent_rows` in `ui::sidebar`.
-    #[serde(deserialize_with = "deserialize_sidebar_wrap")]
-    pub wrap: u16,
-}
-
-fn deserialize_sidebar_wrap<'de, D>(deserializer: D) -> Result<u16, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let wrap = u16::deserialize(deserializer)?;
-    if wrap == 0 || wrap > MAX_SIDEBAR_WRAP {
-        return Err(serde::de::Error::custom(format!(
-            "sidebar wrap must be between 1 and {MAX_SIDEBAR_WRAP}"
-        )));
-    }
-    Ok(wrap)
 }
 
 impl AgentsSidebarConfig {
@@ -424,7 +400,6 @@ impl Default for AgentsSidebarConfig {
             ],
             rows_by_agent: BTreeMap::new(),
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
-            wrap: DEFAULT_SIDEBAR_WRAP,
         }
     }
 }

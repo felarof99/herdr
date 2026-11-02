@@ -647,47 +647,6 @@ impl Palette {
     }
 }
 
-/// Resolved per-state agent status colors.
-///
-/// Each slot is `None` unless `[ui.status_colors]` sets it, and `None` means the
-/// active [`Palette`] supplies the color, so defaults follow theme switches. The
-/// table is resolved once at config load/reload, never inside a render loop.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct StatusColors {
-    pub working: Option<Color>,
-    pub blocked: Option<Color>,
-    pub done: Option<Color>,
-    pub idle: Option<Color>,
-    pub unknown: Option<Color>,
-}
-
-impl StatusColors {
-    pub fn from_config(config: &crate::config::StatusColorsConfig) -> Self {
-        use crate::config::StatusColorSlot;
-        Self {
-            working: config.resolved(StatusColorSlot::Working),
-            blocked: config.resolved(StatusColorSlot::Blocked),
-            done: config.resolved(StatusColorSlot::Done),
-            idle: config.resolved(StatusColorSlot::Idle),
-            unknown: config.resolved(StatusColorSlot::Unknown),
-        }
-    }
-
-    /// The configured color for one rendered state, if `[ui.status_colors]` set it.
-    ///
-    /// `AgentState::Idle` splits on `seen`: an unseen idle agent is `done`, a seen
-    /// one is `idle`, matching the labels the sidebar draws.
-    pub fn for_state(&self, state: AgentState, seen: bool) -> Option<Color> {
-        match (state, seen) {
-            (AgentState::Blocked, _) => self.blocked,
-            (AgentState::Working, _) => self.working,
-            (AgentState::Idle, false) => self.done,
-            (AgentState::Idle, true) => self.idle,
-            (AgentState::Unknown, _) => self.unknown,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkspaceCardArea {
     pub ws_idx: usize,
@@ -1253,7 +1212,6 @@ pub enum ContextMenuKind {
     Tab {
         ws_idx: usize,
         tab_idx: usize,
-        muted: bool,
     },
     Pane {
         ws_idx: usize,
@@ -1262,7 +1220,6 @@ pub enum ContextMenuKind {
         source_pane_id: Option<PaneId>,
         has_manual_label: bool,
         right_click_passthrough: bool,
-        muted: bool,
     },
 }
 
@@ -1299,17 +1256,11 @@ impl ContextMenuState {
                 "Open worktree...",
                 if collapsed { "Expand" } else { "Collapse" },
             ],
-            ContextMenuKind::Tab { muted, .. } => vec![
-                "New tab",
-                "Rename",
-                if muted { "Unmute tab" } else { "Mute tab" },
-                "Close",
-            ],
+            ContextMenuKind::Tab { .. } => vec!["New tab", "Rename", "Close"],
             ContextMenuKind::Pane {
                 source_pane_id,
                 has_manual_label,
                 right_click_passthrough,
-                muted,
                 ..
             } => {
                 let mut items = vec!["Rename pane"];
@@ -1325,7 +1276,6 @@ impl ContextMenuState {
                 } else {
                     "Send right-clicks to pane"
                 });
-                items.push(if muted { "Unmute pane" } else { "Mute pane" });
                 items.push("Close pane");
                 items
             }
@@ -1522,8 +1472,6 @@ pub struct AppState {
     pub sidebar_section_split: f32,
     pub agent_panel_sort: AgentPanelSort,
     pub status_indicators: crate::config::StatusIndicatorStyle,
-    /// Per-state status colors resolved from `[ui.status_colors]`.
-    pub status_colors: StatusColors,
     /// Transient session-wide projection override for the built-in Agents view.
     pub agent_view_override: Option<crate::api::schema::AgentViewSetParams>,
     /// Sidebar-selected manifest preset identity. API-installed overrides leave this unset.
@@ -1920,7 +1868,6 @@ impl AppState {
             sidebar_section_split: 0.5,
             agent_panel_sort: AgentPanelSort::Spaces,
             status_indicators: crate::config::StatusIndicatorStyle::Dots,
-            status_colors: StatusColors::default(),
             agent_view_override: None,
             plugin_agent_view_selection: None,
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
@@ -2304,9 +2251,9 @@ impl AppState {
                 | ContextMenuKind::GitWorkspace { ws_idx, .. } => {
                     assert_workspace_index(ws_idx, "context menu workspace")
                 }
-                ContextMenuKind::Tab {
-                    ws_idx, tab_idx, ..
-                } => assert_tab_index(ws_idx, tab_idx, "context menu tab"),
+                ContextMenuKind::Tab { ws_idx, tab_idx } => {
+                    assert_tab_index(ws_idx, tab_idx, "context menu tab")
+                }
                 ContextMenuKind::Pane {
                     ws_idx,
                     tab_idx,

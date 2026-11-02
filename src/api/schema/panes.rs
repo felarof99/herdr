@@ -50,19 +50,6 @@ pub struct PaneInputSetParams {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum PaneMuteMode {
-    Muted,
-    Unmuted,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct PaneMuteSetParams {
-    pub pane_id: String,
-    pub mode: PaneMuteMode,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
 pub enum PaneDirection {
     Left,
     Right,

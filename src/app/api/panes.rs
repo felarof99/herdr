@@ -6,9 +6,9 @@ use crate::api::schema::{
     PaneFocusDirectionReason, PaneFocusDirectionResult, PaneInfo, PaneInputSetParams,
     PaneLayoutPane, PaneLayoutParams, PaneLayoutRect, PaneLayoutSnapshot, PaneLayoutSplit,
     PaneListParams, PaneMoveDestination, PaneMoveParams, PaneMoveReason, PaneMoveResult,
-    PaneMuteMode, PaneMuteSetParams, PaneNeighborParams, PaneNeighborResult, PaneProcessInfo,
-    PaneProcessInfoParams, PaneProcessInfoProcess, PaneReadParams, PaneReadResult,
-    PaneReleaseAgentParams, PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
+    PaneNeighborParams, PaneNeighborResult, PaneProcessInfo, PaneProcessInfoParams,
+    PaneProcessInfoProcess, PaneReadParams, PaneReadResult, PaneReleaseAgentParams,
+    PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
     PaneReportMetadataParams, PaneResizeParams, PaneResizeReason, PaneResizeResult,
     PaneSendInputParams, PaneSendKeysParams, PaneSendTextParams, PaneSplitParams, PaneSwapParams,
     PaneSwapReason, PaneSwapResult, PaneTarget, PaneZoomMode, PaneZoomParams, PaneZoomReason,
@@ -1160,35 +1160,6 @@ impl App {
         encode_success(id, ResponseResult::Ok {})
     }
 
-    pub(super) fn handle_pane_mute_set(&mut self, id: String, params: PaneMuteSetParams) -> String {
-        let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
-            return pane_not_found(id, &params.pane_id);
-        };
-        let Some(terminal_id) = self
-            .state
-            .workspaces
-            .get(ws_idx)
-            .and_then(|workspace| workspace.terminal_id(pane_id))
-            .cloned()
-        else {
-            return pane_not_found(id, &params.pane_id);
-        };
-        let Some(terminal) = self.state.terminals.get_mut(&terminal_id) else {
-            return pane_not_found(id, &params.pane_id);
-        };
-        let changed = match params.mode {
-            PaneMuteMode::Muted => terminal.mute(),
-            PaneMuteMode::Unmuted => terminal.unmute(),
-        };
-        if changed {
-            self.state.mark_session_dirty();
-            self.emit_pane_updated(ws_idx, pane_id);
-        }
-        let pane = self.pane_info(ws_idx, pane_id).unwrap();
-
-        encode_success(id, ResponseResult::PaneInfo { pane })
-    }
-
     pub(super) fn handle_pane_rename(&mut self, id: String, params: PaneRenameParams) -> String {
         let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
             return pane_not_found(id, &params.pane_id);
@@ -1981,65 +1952,6 @@ mod tests {
                 .unwrap()
                 .right_click_passthrough
         );
-    }
-
-    #[test]
-    fn tests_that_pane_mute_sets_and_clears_persisted_state_and_metadata() {
-        let (mut app, public_pane_id) = app_with_test_workspace();
-        let internal_pane_id = app.state.workspaces[0].tabs[0].root_pane;
-        let terminal_id = app.state.workspaces[0]
-            .terminal_id(internal_pane_id)
-            .unwrap()
-            .clone();
-
-        let response = app.handle_pane_mute_set(
-            "mute".into(),
-            crate::api::schema::PaneMuteSetParams {
-                pane_id: public_pane_id.clone(),
-                mode: crate::api::schema::PaneMuteMode::Muted,
-            },
-        );
-
-        let response: SuccessResponse = serde_json::from_str(&response).unwrap();
-        let ResponseResult::PaneInfo { pane } = response.result else {
-            panic!("expected pane info");
-        };
-        assert!(app.state.terminals[&terminal_id].is_muted());
-        assert_eq!(pane.tokens.get("muted").map(String::as_str), Some("true"));
-        assert!(app.state.session_dirty);
-
-        app.state.session_dirty = false;
-        let response = app.handle_pane_mute_set(
-            "unmute".into(),
-            crate::api::schema::PaneMuteSetParams {
-                pane_id: public_pane_id,
-                mode: crate::api::schema::PaneMuteMode::Unmuted,
-            },
-        );
-
-        let response: SuccessResponse = serde_json::from_str(&response).unwrap();
-        let ResponseResult::PaneInfo { pane } = response.result else {
-            panic!("expected pane info");
-        };
-        assert!(!app.state.terminals[&terminal_id].is_muted());
-        assert!(!pane.tokens.contains_key("muted"));
-        assert!(app.state.session_dirty);
-    }
-
-    #[test]
-    fn tests_that_pane_mute_rejects_a_missing_pane() {
-        let (mut app, _) = app_with_test_workspace();
-
-        let response = app.handle_pane_mute_set(
-            "mute".into(),
-            crate::api::schema::PaneMuteSetParams {
-                pane_id: "missing:pane".into(),
-                mode: crate::api::schema::PaneMuteMode::Muted,
-            },
-        );
-
-        let response: ErrorResponse = serde_json::from_str(&response).unwrap();
-        assert_eq!(response.error.code, "pane_not_found");
     }
 
     fn app_with_send_key_runtime(

@@ -11,10 +11,6 @@ use crate::workspace::Workspace;
 /// Current snapshot format version.
 pub(super) const SNAPSHOT_VERSION: u32 = 3;
 
-fn is_false(value: &bool) -> bool {
-    !*value
-}
-
 /// Serializable snapshot of the entire herdr session.
 #[derive(Serialize, Deserialize)]
 pub struct SessionSnapshot {
@@ -103,8 +99,6 @@ pub struct PaneSnapshot {
     pub cwd: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub muted: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -370,7 +364,6 @@ fn capture_tab(
             PaneSnapshot {
                 cwd,
                 label,
-                muted: terminal.is_some_and(crate::terminal::TerminalState::is_muted),
                 agent_name,
                 managed_agent_kind,
                 agent_session,
@@ -622,19 +615,6 @@ mod tests {
     }
 
     #[test]
-    fn tests_that_muted_pane_survives_session_json_round_trip() {
-        let mut state = state_with_workspaces(&["muted"]);
-        let pane_id = state.workspaces[0].tabs[0].root_pane;
-        let terminal_id = state.workspaces[0].terminal_id(pane_id).unwrap().clone();
-        state.terminals.get_mut(&terminal_id).unwrap().mute();
-
-        let json = serde_json::to_string(&capture_from_state(&state)).unwrap();
-        let restored = parse_snapshot(&json).unwrap();
-
-        assert!(restored.workspaces[0].tabs[0].panes[&pane_id.raw()].muted);
-    }
-
-    #[test]
     fn round_trip_layout_snapshot() {
         let layout = LayoutSnapshot::Split {
             direction: DirectionSnapshot::Horizontal,
@@ -664,7 +644,6 @@ mod tests {
             PaneSnapshot {
                 cwd: PathBuf::from("/home/can/Projects/herdr"),
                 label: None,
-                muted: false,
                 agent_name: None,
                 managed_agent_kind: None,
                 agent_session: None,
@@ -676,7 +655,6 @@ mod tests {
             PaneSnapshot {
                 cwd: PathBuf::from("/home/can/Projects/website"),
                 label: Some("website".into()),
-                muted: false,
                 agent_name: None,
                 managed_agent_kind: None,
                 agent_session: None,
@@ -1225,7 +1203,6 @@ mod tests {
             PaneSnapshot {
                 cwd: PathBuf::from("/tmp/this-directory-does-not-exist-for-herdr-test"),
                 label: None,
-                muted: false,
                 agent_name: None,
                 managed_agent_kind: None,
                 agent_session: None,
@@ -1239,7 +1216,6 @@ mod tests {
                     .map(PathBuf::from)
                     .unwrap_or_else(|_| PathBuf::from("/tmp")),
                 label: None,
-                muted: false,
                 agent_name: None,
                 managed_agent_kind: None,
                 agent_session: None,

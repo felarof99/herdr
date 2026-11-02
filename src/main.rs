@@ -364,16 +364,6 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # distinct static glyphs for blocked, working, done, idle, and unknown states.
 # status_indicators = "dots"
 
-# Optional per-state status colors for the agent status icon and its status text.
-# Every key is optional; an omitted table or key keeps the active theme's color.
-# Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
-# [ui.status_colors]
-# working = "#a6e3a1"   # default: the theme's yellow
-# blocked = "#f38ba8"   # default: the theme's red
-# done = "#89b4fa"      # default: the theme's teal
-# idle = "#6c7086"      # default: the theme's green
-# unknown = "#45475a"   # default: the theme's muted overlay color
-
 # Expanded agent rows. Built-ins are state_icon, state_text, workspace, tab, pane, agent,
 # terminal_title, and terminal_title_stripped.
 # Custom values reported through pane metadata use a $name token.
@@ -382,12 +372,6 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # [ui.sidebar.agents]
 # Blank rows between agent entries. Set to 1 to restore the previous spacing.
 # row_gap = 0
-# Display lines one row may occupy, 1 to 4. The default 1 truncates a row too
-# wide for the panel; above that it wraps onto up to this many lines, breaking on
-# spaces, and only the last line it is allowed is elided. Only a row holding
-# exactly one text token wraps — a row with several tokens already drops tokens
-# to fit.
-# wrap = 1
 # rows = [["state_icon", "workspace", "tab"], ["agent"]]
 # Optional canonical agent IDs replace the default rows for matching agents.
 # [ui.sidebar.agents.rows_by_agent]

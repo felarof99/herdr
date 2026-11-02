@@ -1,6 +1,6 @@
 use ratatui::{
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Clear, Paragraph},
     Frame,
@@ -11,9 +11,9 @@ use super::sidebar::{
     next_entry_is_indented_workspace, workspace_list_entries_expanded, AgentPanelEntry,
     WorkspaceListEntry,
 };
-use super::status::{state_icon, state_icon_symbol, toast_dot_color};
+use super::status::{state_icon, state_icon_symbol};
 use super::text::{display_width_u16, truncate_end};
-use crate::app::state::{Palette, StatusColors, ToastKind, ToastNotification};
+use crate::app::state::{Palette, ToastKind, ToastNotification};
 use crate::app::AppState;
 use crate::config::StatusIndicatorStyle;
 use crate::detect::AgentState;
@@ -239,14 +239,17 @@ pub(crate) fn render_mobile_toast_banner(
     area: Rect,
     toast: &ToastNotification,
     offset_for_warning: bool,
-    status_colors: &StatusColors,
     p: &Palette,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
     }
 
-    let dot_color = toast_dot_color(toast.kind, status_colors, p);
+    let dot_color = match toast.kind {
+        ToastKind::NeedsAttention => p.red,
+        ToastKind::Finished => p.blue,
+        ToastKind::UpdateInstalled => p.accent,
+    };
     let banner = mobile_toast_banner_rect(area, offset_for_warning);
     let bg = p.surface0;
 
@@ -324,7 +327,7 @@ fn render_header_status(
     };
 
     let (state, seen) = ws.aggregate_state(&app.terminals);
-    let (dot, dot_style) = state_icon(state, seen, app.status_indicators, &app.status_colors, p);
+    let (dot, dot_style) = state_icon(state, seen, app.status_indicators, p);
     let tab_label = mobile_tab_status(ws);
     let row1 = Rect::new(area.x, area.y, area.width, 1);
     let tab_w = display_width_u16(&tab_label)
@@ -404,13 +407,7 @@ fn render_switch_button(app: &AppState, frame: &mut Frame, area: Rect) {
     // "tap me" without the user reading the summary row.
     if global_agent_counts(app).blocked > 0 {
         let bx = area.x + area.width.saturating_sub(1);
-        let (symbol, style) = state_icon(
-            AgentState::Blocked,
-            true,
-            app.status_indicators,
-            &app.status_colors,
-            p,
-        );
+        let (symbol, style) = state_icon(AgentState::Blocked, true, app.status_indicators, p);
         frame.buffer_mut()[(bx, area.y)]
             .set_symbol(symbol)
             .set_style(style.bg(p.surface0));
@@ -537,13 +534,7 @@ fn render_mobile_switcher_content(
                 entry.ws_idx == ws_idx && entry.tab_idx == tab_idx && entry.pane_id == pane_id
             });
             let bg = mobile_item_bg(false, active, p);
-            let (icon, icon_style) = state_icon(
-                entry.state,
-                entry.seen,
-                app.status_indicators,
-                &app.status_colors,
-                p,
-            );
+            let (icon, icon_style) = state_icon(entry.state, entry.seen, app.status_indicators, p);
             let title = Line::from(vec![
                 Span::styled("  ", Style::default().bg(bg)),
                 Span::styled(icon, icon_style.bg(bg)),
@@ -606,8 +597,7 @@ fn render_mobile_switcher_content(
         let selected = *ws_idx == app.selected;
         let bg = mobile_item_bg(selected, active, p);
         let (state, seen) = ws.aggregate_state(&app.terminals);
-        let (dot, dot_style) =
-            state_icon(state, seen, app.status_indicators, &app.status_colors, p);
+        let (dot, dot_style) = state_icon(state, seen, app.status_indicators, p);
 
         let mut title_spans = vec![Span::styled("  ", Style::default().bg(bg))];
         // Worktrees of the same space render as branches off their parent, so a
@@ -1129,23 +1119,6 @@ fn fit_summary_segments(
     (shown, truncated)
 }
 
-/// Color for the loud, leading summary segment.
-///
-/// Configured status colors win, so the header agrees with the dots below it.
-/// Unset slots keep the header's own defaults, which are not the sidebar's:
-/// done is the theme's blue and idle stays muted. "no agents" and "all idle"
-/// are not a state and always stay muted.
-fn summary_tone_color(tone: SummaryTone, status_colors: &StatusColors, p: &Palette) -> Color {
-    let (state, seen, default) = match tone {
-        SummaryTone::Blocked => (AgentState::Blocked, true, p.red),
-        SummaryTone::Done => (AgentState::Idle, false, p.blue),
-        SummaryTone::Working => (AgentState::Working, true, p.yellow),
-        SummaryTone::Idle => (AgentState::Idle, true, p.overlay1),
-        SummaryTone::Muted => return p.overlay1,
-    };
-    status_colors.for_state(state, seen).unwrap_or(default)
-}
-
 fn agent_summary_line(app: &AppState, p: &Palette, max_width: u16) -> Line<'static> {
     let segments = agent_summary_segments(global_agent_counts(app), app.status_indicators);
     let (shown, truncated) = fit_summary_segments(segments, max_width as usize);
@@ -1163,7 +1136,12 @@ fn agent_summary_line(app: &AppState, p: &Palette, max_width: u16) -> Line<'stat
         // Only the leading (most urgent) segment keeps its state color; the
         // rest stay dim so the urgent count is the loud thing.
         let style = if idx == 0 {
-            let color = summary_tone_color(tone, &app.status_colors, p);
+            let color = match tone {
+                SummaryTone::Blocked => p.red,
+                SummaryTone::Done => p.blue,
+                SummaryTone::Working => p.yellow,
+                SummaryTone::Idle | SummaryTone::Muted => p.overlay1,
+            };
             let style = Style::default().fg(color).bg(p.panel_bg);
             if tone == SummaryTone::Muted {
                 style
@@ -1346,70 +1324,6 @@ mod tests {
             terminal.backend().buffer()[(area.width - 1, 0)].symbol(),
             "×"
         );
-    }
-
-    #[test]
-    fn summary_tone_colors_follow_status_colors_and_keep_header_defaults() {
-        let palette = Palette::catppuccin();
-        let unset = StatusColors::default();
-        for (tone, expected) in [
-            (SummaryTone::Blocked, palette.red),
-            (SummaryTone::Done, palette.blue),
-            (SummaryTone::Working, palette.yellow),
-            (SummaryTone::Idle, palette.overlay1),
-            (SummaryTone::Muted, palette.overlay1),
-        ] {
-            assert_eq!(
-                summary_tone_color(tone, &unset, &palette),
-                expected,
-                "{tone:?}"
-            );
-        }
-
-        let configured = StatusColors {
-            blocked: Some(Color::Rgb(1, 0, 0)),
-            done: Some(Color::Rgb(2, 0, 0)),
-            working: Some(Color::Rgb(3, 0, 0)),
-            idle: Some(Color::Rgb(4, 0, 0)),
-            unknown: Some(Color::Rgb(5, 0, 0)),
-        };
-        for (tone, expected) in [
-            (SummaryTone::Blocked, Color::Rgb(1, 0, 0)),
-            (SummaryTone::Done, Color::Rgb(2, 0, 0)),
-            (SummaryTone::Working, Color::Rgb(3, 0, 0)),
-            (SummaryTone::Idle, Color::Rgb(4, 0, 0)),
-            (SummaryTone::Muted, palette.overlay1),
-        ] {
-            assert_eq!(
-                summary_tone_color(tone, &configured, &palette),
-                expected,
-                "{tone:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn agent_summary_line_leads_with_configured_blocked_color() {
-        let mut app = crate::app::state::AppState::test_new();
-        app.workspaces = vec![crate::workspace::Workspace::test_new("blocked")];
-        app.ensure_test_terminals();
-        let pane_id = app.workspaces[0].tabs[0].root_pane;
-        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
-            .attached_terminal_id
-            .clone();
-        let terminal_state = app.terminals.get_mut(&terminal_id).unwrap();
-        terminal_state.detected_agent = Some(crate::detect::Agent::Claude);
-        terminal_state.state = AgentState::Blocked;
-
-        let default_line = agent_summary_line(&app, &app.palette, 40);
-        assert!(default_line.spans[1].content.contains("1 blocked"));
-        assert_eq!(default_line.spans[1].style.fg, Some(app.palette.red));
-
-        let blocked = Color::Rgb(9, 8, 7);
-        app.status_colors.blocked = Some(blocked);
-        let configured_line = agent_summary_line(&app, &app.palette, 40);
-        assert!(configured_line.spans[1].content.contains("1 blocked"));
-        assert_eq!(configured_line.spans[1].style.fg, Some(blocked));
     }
 
     #[test]

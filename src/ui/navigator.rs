@@ -113,24 +113,13 @@ fn push_state_chip(
     label: &'static str,
     app: &AppState,
 ) {
-    let (icon, icon_style) = state_icon(
-        state,
-        seen,
-        app.status_indicators,
-        &app.status_colors,
-        &app.palette,
-    );
+    let (icon, icon_style) = state_icon(state, seen, app.status_indicators, &app.palette);
     spans.push(Span::styled(icon, icon_style.add_modifier(Modifier::BOLD)));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(
         label,
         Style::default()
-            .fg(state_label_color(
-                state,
-                seen,
-                &app.status_colors,
-                &app.palette,
-            ))
+            .fg(state_label_color(state, seen, &app.palette))
             .add_modifier(Modifier::BOLD),
     ));
 }
@@ -212,13 +201,7 @@ fn render_row(
     } else {
         Style::default().fg(p.subtext0).bg(p.panel_bg)
     };
-    let (status_icon, status_style) = state_icon(
-        row.status,
-        row.seen,
-        app.status_indicators,
-        &app.status_colors,
-        p,
-    );
+    let (status_icon, status_style) = state_icon(row.status, row.seen, app.status_indicators, p);
     let status_style = if selected {
         base_style.add_modifier(Modifier::BOLD)
     } else if context_only {
@@ -278,12 +261,7 @@ fn render_row(
             Style::default().fg(p.overlay0).bg(p.panel_bg)
         } else {
             Style::default()
-                .fg(state_label_color(
-                    row.status,
-                    row.seen,
-                    &app.status_colors,
-                    p,
-                ))
+                .fg(state_label_color(row.status, row.seen, p))
                 .bg(p.panel_bg)
         };
         frame.render_widget(
@@ -593,32 +571,6 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
 mod tests {
     use super::*;
     use crate::detect::AgentState;
-
-    #[test]
-    fn state_chips_use_configured_status_colors() {
-        let mut app = crate::app::state::AppState::test_new();
-        let mut spans = Vec::new();
-        push_state_chip(&mut spans, AgentState::Working, true, "working", &app);
-        assert_eq!(spans[0].style.fg, Some(app.palette.yellow));
-        assert_eq!(spans[2].style.fg, Some(app.palette.yellow));
-
-        let working = ratatui::style::Color::Rgb(1, 2, 3);
-        app.status_colors.working = Some(working);
-        let mut spans = Vec::new();
-        push_state_chip(&mut spans, AgentState::Working, true, "working", &app);
-        assert_eq!(spans[0].style.fg, Some(working));
-        assert_eq!(spans[2].style.fg, Some(working));
-
-        // The done chip is the unseen idle state; the idle chip is the seen one.
-        let done = ratatui::style::Color::Rgb(4, 5, 6);
-        app.status_colors.done = Some(done);
-        let mut spans = Vec::new();
-        push_state_chip(&mut spans, AgentState::Idle, false, "done", &app);
-        assert_eq!(spans[0].style.fg, Some(done));
-        let mut spans = Vec::new();
-        push_state_chip(&mut spans, AgentState::Idle, true, "idle", &app);
-        assert_eq!(spans[0].style.fg, Some(app.palette.green));
-    }
 
     fn row(depth: u8, is_workspace: bool) -> NavigatorRow {
         NavigatorRow {

@@ -635,7 +635,6 @@ impl App {
             sidebar_section_split,
             agent_panel_sort,
             status_indicators: config.ui.status_indicators,
-            status_colors: state::StatusColors::from_config(&config.ui.status_colors),
             agent_view_override: None,
             plugin_agent_view_selection: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
@@ -1511,8 +1510,6 @@ impl App {
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.status_indicators = config.ui.status_indicators;
-                self.state.status_colors =
-                    state::StatusColors::from_config(&config.ui.status_colors);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scroll = 0;
@@ -3573,46 +3570,6 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("delivery = \"terminal\""));
         assert!(app.state.config_diagnostic.is_none());
-
-        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn status_colors_load_and_reload_from_config() {
-        let _guard = config_env_lock().lock().unwrap();
-        let path = temp_config_path("status-colors-reload");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "onboarding = false\n").unwrap();
-        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
-
-        // No table configured: every slot stays unset so the palette default wins.
-        let mut app = test_app();
-        assert_eq!(app.state.status_colors, state::StatusColors::default());
-
-        std::fs::write(
-            &path,
-            "onboarding = false\n\n[ui.status_colors]\nworking = \"#71b7ff\"\nblocked = \"#ffd60a\"\n",
-        )
-        .unwrap();
-        app.reload_config();
-
-        assert_eq!(
-            app.state.status_colors.working,
-            Some(ratatui::style::Color::Rgb(0x71, 0xb7, 0xff))
-        );
-        assert_eq!(
-            app.state.status_colors.blocked,
-            Some(ratatui::style::Color::Rgb(0xff, 0xd6, 0x0a))
-        );
-        assert_eq!(app.state.status_colors.done, None);
-        assert_eq!(app.state.status_colors.idle, None);
-        assert_eq!(app.state.status_colors.unknown, None);
-
-        // Removing the table restores the built-in colors on the next reload.
-        std::fs::write(&path, "onboarding = false\n").unwrap();
-        app.reload_config();
-        assert_eq!(app.state.status_colors, state::StatusColors::default());
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

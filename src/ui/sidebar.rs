@@ -19,9 +19,6 @@ use crate::terminal::TerminalRuntimeRegistry;
 
 const WORKSPACE_SECTION_HEADER_ROWS: u16 = 2;
 const AGENT_PANEL_HEADER_ROWS: u16 = 3;
-/// Indent of an entry's first display line, and of every line after it.
-const AGENT_ROW_FIRST_INDENT: u16 = 1;
-const AGENT_ROW_CONTINUATION_INDENT: u16 = 3;
 
 pub(crate) struct AgentPanelEntry {
     pub ws_idx: usize,
@@ -555,109 +552,12 @@ fn resolved_agent_rows(app: &AppState, entry: &AgentPanelEntry) -> Vec<Vec<Resol
     tokens::agent_rows(&app.sidebar_agents, entry, label)
 }
 
-/// Split `text` into at most `max_lines` lines of `width` columns, breaking on
-/// spaces where it can. The last line is elided if the text still does not fit,
-/// so a wrapped row shows as much as it has room for and never more.
-fn wrap_text(text: &str, width: usize, max_lines: usize) -> Vec<String> {
-    if width == 0 || max_lines == 0 {
-        return Vec::new();
-    }
-
-    let mut lines: Vec<String> = Vec::new();
-    let mut rest = text.trim();
-    while !rest.is_empty() {
-        if lines.len() + 1 == max_lines || display_width(rest) <= width {
-            lines.push(truncate_end(rest, width));
-            return lines;
-        }
-
-        // Longest prefix that fits, then retreat to the last space in it. A
-        // single word wider than the panel has no space to retreat to and is
-        // broken where it fills the line.
-        let mut split = rest.len();
-        for (index, _) in rest.char_indices() {
-            if display_width(&rest[..index]) > width {
-                split = index.saturating_sub(1).max(1);
-                break;
-            }
-        }
-        while split < rest.len() && !rest.is_char_boundary(split) {
-            split -= 1;
-        }
-        let head = &rest[..split];
-        let split = head.rfind(' ').map(|at| at + 1).unwrap_or(split);
-        let (line, remainder) = rest.split_at(split);
-        let line = line.trim_end();
-        if line.is_empty() {
-            lines.push(truncate_end(rest, width));
-            return lines;
-        }
-        lines.push(line.to_string());
-        rest = remainder.trim_start();
-    }
-    lines
-}
-
-/// Configured rows expanded to the display lines they actually occupy.
-///
-/// Only a row holding exactly one text token wraps. A row with several tokens
-/// already has its own fitting rules — it drops tokens to make room
-/// (`resolved_token_spans`) — and re-flowing that across lines would fight
-/// them. In practice the wide row is the one carrying a task or a title, and it
-/// is alone on its row.
-///
-/// Every line of a wrapped row is measured against the continuation indent,
-/// which is the widest indent any of them can be given, so a wrapped row never
-/// overflows whichever line it starts on.
-fn wrapped_agent_rows(
-    app: &AppState,
-    entry: &AgentPanelEntry,
-    body_width: u16,
-) -> Vec<Vec<ResolvedToken>> {
-    let rows = resolved_agent_rows(app, entry);
-    let max_lines = app.sidebar_agents.wrap.max(1) as usize;
-    if max_lines <= 1 {
-        return rows;
-    }
-    let width = body_width.saturating_sub(AGENT_ROW_CONTINUATION_INDENT) as usize;
-    if width == 0 {
-        return rows;
-    }
-
-    let mut expanded: Vec<Vec<ResolvedToken>> = Vec::with_capacity(rows.len());
-    for row in rows {
-        let Some(text) = single_text_token(&row).filter(|text| display_width(text) > width) else {
-            expanded.push(row);
-            continue;
-        };
-        let lines = wrap_text(text, width, max_lines);
-        let wrapped = lines
-            .into_iter()
-            .filter_map(|line| row[0].with_text(line).map(|token| vec![token]))
-            .collect::<Vec<_>>();
-        if wrapped.len() > 1 {
-            expanded.extend(wrapped);
-        } else {
-            expanded.push(row);
-        }
-    }
-    expanded
-}
-
-fn single_text_token(row: &[ResolvedToken]) -> Option<&str> {
-    match row {
-        [token] => token.kind.text(),
-        _ => None,
-    }
-}
-
 pub(crate) fn agent_entry_height_in_body(
     app: &AppState,
     entry: &AgentPanelEntry,
-    body_width: u16,
     body_height: u16,
 ) -> u16 {
-    (wrapped_agent_rows(app, entry, body_width)
+    (resolved_agent_rows(app, entry)
         .len()
         .max(1)
         .min(u16::MAX as usize) as u16)
@@ -682,7 +582,7 @@ fn agent_panel_visible_count_from(app: &AppState, area: Rect, scroll: usize) -> 
     let mut visible = 0usize;
     let entries = agent_panel_entries(app);
     for (index, entry) in entries.iter().enumerate().skip(scroll) {
-        let height = agent_entry_height_in_body(app, entry, body.width, body.height);
+        let height = agent_entry_height_in_body(app, entry, body.height);
         if used_rows.saturating_add(height) > body.height {
             break;
         }
@@ -702,8 +602,7 @@ fn agent_panel_bottom_start(app: &AppState, area: Rect) -> usize {
     let mut start = entries.len();
     for (index, entry) in entries.iter().enumerate().rev() {
         let gap = agent_entry_gap(app, index, entries.len());
-        let needed =
-            agent_entry_height_in_body(app, entry, body.width, body.height).saturating_add(gap);
+        let needed = agent_entry_height_in_body(app, entry, body.height).saturating_add(gap);
         if used_rows.saturating_add(needed) > body.height {
             break;
         }
@@ -886,13 +785,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             break;
         }
         let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
-        let (icon, icon_style) = state_icon(
-            agg_state,
-            agg_seen,
-            app.status_indicators,
-            &app.status_colors,
-            p,
-        );
+        let (icon, icon_style) = state_icon(agg_state, agg_seen, app.status_indicators, p);
         let is_selected = visible_idx == app.selected && is_navigating;
         let is_active = Some(visible_idx) == app.active;
         let row_style = if is_selected {
@@ -958,13 +851,8 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             } else {
                 Style::default().fg(p.overlay0)
             };
-            let (icon, icon_style) = state_icon(
-                detail.state,
-                detail.seen,
-                app.status_indicators,
-                &app.status_colors,
-                p,
-            );
+            let (icon, icon_style) =
+                state_icon(detail.state, detail.seen, app.status_indicators, p);
 
             if is_active {
                 let buf = frame.buffer_mut();
@@ -1408,20 +1296,9 @@ fn render_workspace_list(
             .filter(|(_, collapsed)| *collapsed)
             .map(|(key, _)| space_aggregate_state(app, key))
             .unwrap_or((agg_state, agg_seen));
-        let state_icon = state_icon(
-            display_state,
-            display_seen,
-            app.status_indicators,
-            &app.status_colors,
-            p,
-        );
+        let state_icon = state_icon(display_state, display_seen, app.status_indicators, p);
         let state_text_style = Style::default()
-            .fg(state_label_color(
-                display_state,
-                display_seen,
-                &app.status_colors,
-                p,
-            ))
+            .fg(state_label_color(display_state, display_seen, p))
             .add_modifier(Modifier::DIM);
         let branch_style = Style::default().fg(if selected || is_active {
             p.mauve
@@ -1607,8 +1484,8 @@ fn render_agent_detail(
     let mut row_y = body.y;
     let body_bottom = body.y + body.height;
     for (index, detail) in details.iter().enumerate().skip(scroll) {
-        let label_color = state_label_color(detail.state, detail.seen, &app.status_colors, p);
-        let rows = wrapped_agent_rows(app, detail, body.width);
+        let label_color = state_label_color(detail.state, detail.seen, p);
+        let rows = resolved_agent_rows(app, detail);
         let height = (rows.len().max(1) as u16).min(body.height);
         if row_y.saturating_add(height) > body_bottom {
             break;
@@ -1631,21 +1508,10 @@ fn render_agent_detail(
             Style::default().fg(label_color).add_modifier(Modifier::DIM)
         };
         let agent_style = Style::default().fg(p.overlay0).add_modifier(Modifier::DIM);
-        let state_icon = state_icon(
-            detail.state,
-            detail.seen,
-            app.status_indicators,
-            &app.status_colors,
-            p,
-        );
+        let state_icon = state_icon(detail.state, detail.seen, app.status_indicators, p);
 
         for (row_index, resolved) in rows.iter().take(height as usize).enumerate() {
-            let indent = if row_index == 0 {
-                AGENT_ROW_FIRST_INDENT
-            } else {
-                AGENT_ROW_CONTINUATION_INDENT
-            };
-            let mut spans = vec![Span::raw(" ".repeat(indent as usize))];
+            let mut spans = vec![Span::raw(if row_index == 0 { " " } else { "   " })];
             spans.extend(resolved_token_spans(
                 resolved,
                 state_icon,
@@ -1654,7 +1520,8 @@ fn render_agent_detail(
                 agent_style,
                 agent_style,
                 p,
-                body.width.saturating_sub(indent) as usize,
+                body.width
+                    .saturating_sub(if row_index == 0 { 1 } else { 3 }) as usize,
             ));
             frame.render_widget(
                 Paragraph::new(Line::from(spans)).style(row_style),
@@ -1999,130 +1866,6 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     }
 
     #[test]
-    fn wrap_text_breaks_on_spaces_and_keeps_every_word() {
-        let lines = wrap_text("herdr sidebar task text and branch segment", 16, 4);
-        assert_eq!(
-            lines,
-            vec!["herdr sidebar", "task text and", "branch segment"]
-        );
-        for line in &lines {
-            assert!(display_width(line) <= 16, "{line:?}");
-        }
-    }
-
-    #[test]
-    fn wrap_text_elides_only_the_last_line_it_is_allowed() {
-        let lines = wrap_text("herdr sidebar task text and branch segment", 16, 2);
-        assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0], "herdr sidebar");
-        assert!(lines[1].ends_with('…'), "{:?}", lines[1]);
-        assert!(display_width(&lines[1]) <= 16);
-    }
-
-    #[test]
-    fn wrap_text_breaks_a_word_wider_than_the_panel() {
-        let lines = wrap_text("supercalifragilistic expialidocious", 10, 4);
-        assert!(lines.len() > 1);
-        for line in &lines {
-            assert!(display_width(line) <= 10, "{line:?}");
-            assert!(!line.is_empty());
-        }
-    }
-
-    #[test]
-    fn wrap_text_measures_columns_not_bytes() {
-        // Each of these is one codepoint, three UTF-8 bytes, two columns wide.
-        let lines = wrap_text("修复修复修复修复", 4, 4);
-        assert_eq!(lines, vec!["修复", "修复", "修复", "修复"]);
-    }
-
-    #[test]
-    fn wrap_text_that_already_fits_is_one_untouched_line() {
-        assert_eq!(wrap_text("short", 16, 3), vec!["short"]);
-    }
-
-    fn wrapping_app(task: &str, wrap: u16) -> crate::app::state::AppState {
-        let mut app = crate::app::state::AppState::test_new();
-        app.workspaces = vec![Workspace::test_new("one")];
-        app.ensure_test_terminals();
-        app.sidebar_agents.rows = vec![vec![crate::config::AgentSidebarToken::Custom(
-            "task".into(),
-        )]];
-        app.sidebar_agents.wrap = wrap;
-        let pane_id = app.workspaces[0].tabs[0].root_pane;
-        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
-            .attached_terminal_id
-            .clone();
-        let terminal = app.terminals.get_mut(&terminal_id).unwrap();
-        terminal.detected_agent = Some(Agent::Claude);
-        terminal.metadata_tokens.patch(
-            std::collections::HashMap::from([("task".into(), Some(task.to_string()))]),
-            None,
-            std::time::Instant::now(),
-        );
-        app
-    }
-
-    #[test]
-    fn a_wide_row_wraps_and_the_entry_grows_to_match() {
-        let task = "herdr sidebar task text and branch segment";
-        let area = Rect::new(0, 0, 20, 12);
-        let body = agent_panel_body_rect(area, false);
-
-        let packed = wrapping_app(task, 1);
-        let entry = &agent_panel_entries(&packed)[0];
-        assert_eq!(
-            agent_entry_height_in_body(&packed, entry, body.width, body.height),
-            1
-        );
-
-        let wrapped = wrapping_app(task, 3);
-        let entry = &agent_panel_entries(&wrapped)[0];
-        let rows = wrapped_agent_rows(&wrapped, entry, body.width);
-        assert_eq!(rows.len(), 3);
-        assert_eq!(
-            agent_entry_height_in_body(&wrapped, entry, body.width, body.height),
-            3,
-            "scroll geometry must count the wrapped lines, not the config rows"
-        );
-        // Every line keeps the token's own kind, so it keeps the token's style.
-        for row in &rows {
-            assert!(matches!(row[0].kind, ResolvedTokenKind::Custom(_)));
-        }
-    }
-
-    #[test]
-    fn a_wrapped_row_renders_its_continuation_lines_indented() {
-        let app = wrapping_app("herdr sidebar task text and branch segment", 3);
-        let area = Rect::new(0, 0, 20, 12);
-        let body = agent_panel_body_rect(area, false);
-        let mut terminal = Terminal::new(TestBackend::new(20, 12)).unwrap();
-        terminal
-            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-
-        assert_eq!(row_text(buffer, body.y, body.width), " herdr sidebar");
-        assert_eq!(row_text(buffer, body.y + 1, body.width), "   task text and");
-        assert_eq!(
-            row_text(buffer, body.y + 2, body.width),
-            "   branch segment"
-        );
-    }
-
-    #[test]
-    fn multi_token_rows_are_left_to_their_own_fitting_rules() {
-        let mut app = wrapping_app("a task that is far too wide for this panel", 3);
-        app.sidebar_agents.rows = vec![vec![
-            crate::config::AgentSidebarToken::StateIcon,
-            crate::config::AgentSidebarToken::Custom("task".into()),
-        ]];
-        let entry = &agent_panel_entries(&app)[0];
-        let rows = wrapped_agent_rows(&app, entry, 20);
-        assert_eq!(rows.len(), 1, "a row with several tokens must not wrap");
-    }
-
-    #[test]
     fn default_agent_row_gap_packs_rendering_and_scroll_geometry() {
         let mut app = crate::app::state::AppState::test_new();
         app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
@@ -2312,12 +2055,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(metrics.max_offset_from_bottom, 0);
         let entry = agent_panel_entries(&app).pop().unwrap();
         assert_eq!(
-            agent_entry_height_in_body(
-                &app,
-                &entry,
-                agent_panel_body_rect(panel, false).width,
-                agent_panel_body_rect(panel, false).height,
-            ),
+            agent_entry_height_in_body(&app, &entry, agent_panel_body_rect(panel, false).height),
             agent_panel_body_rect(panel, false).height
         );
     }
@@ -2695,74 +2433,6 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             buffer[(detail_area.x + 2, detail_area.y + 1)].style().fg,
             Some(app.palette.teal)
         );
-    }
-
-    /// Guards the plumbing, not the mapping: every icon must be drawn from
-    /// `app.status_colors`, not from a default `StatusColors`.
-    #[test]
-    fn configured_status_colors_reach_collapsed_and_expanded_icons() {
-        let first = Workspace::test_new("one");
-        let first_pane = first.tabs[0].root_pane;
-        let second = Workspace::test_new("two");
-        let second_pane = second.tabs[0].root_pane;
-
-        let mut app = crate::app::state::AppState::test_new();
-        app.workspaces = vec![first, second];
-        app.ensure_test_terminals();
-        app.agent_panel_sort = crate::app::state::AgentPanelSort::Priority;
-        let blocked = ratatui::style::Color::Rgb(1, 2, 3);
-        let done = ratatui::style::Color::Rgb(4, 5, 6);
-        app.status_colors = crate::app::state::StatusColors {
-            blocked: Some(blocked),
-            done: Some(done),
-            ..Default::default()
-        };
-
-        let set_state = |app: &mut crate::app::state::AppState, ws_idx: usize, pane_id, state| {
-            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane_id]
-                .attached_terminal_id
-                .clone();
-            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
-            terminal.detected_agent = Some(Agent::Claude);
-            terminal.state = state;
-        };
-        set_state(&mut app, 0, first_pane, AgentState::Idle);
-        set_state(&mut app, 1, second_pane, AgentState::Blocked);
-        app.workspaces[0].tabs[0]
-            .panes
-            .get_mut(&first_pane)
-            .unwrap()
-            .seen = false;
-
-        // Collapsed: priority order lists the blocked agent, then the unseen done one.
-        let area = Rect::new(0, 0, 4, 16);
-        let (_, _, detail_area) = collapsed_sidebar_sections(area);
-        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
-        terminal
-            .draw(|frame| render_sidebar_collapsed(&app, frame, area))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        assert_eq!(buffer[(detail_area.x + 2, detail_area.y)].symbol(), "●");
-        assert_eq!(
-            buffer[(detail_area.x + 2, detail_area.y)].style().fg,
-            Some(blocked)
-        );
-        assert_eq!(
-            buffer[(detail_area.x + 2, detail_area.y + 1)].style().fg,
-            Some(done)
-        );
-
-        // Expanded: the agent panel's first row opens with the blocked agent's icon.
-        let area = Rect::new(0, 0, 26, 20);
-        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
-        terminal
-            .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let (_, agent_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
-        let body = agent_panel_body_rect(agent_area, false);
-        let icon_x = find_symbol_x(buffer, body.y, body.width, "●");
-        assert_eq!(buffer[(icon_x, body.y)].style().fg, Some(blocked));
     }
 
     #[cfg(unix)]

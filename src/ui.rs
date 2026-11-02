@@ -496,7 +496,6 @@ fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) 
                 frame.area(),
                 toast,
                 has_config_diagnostic,
-                &app.status_colors,
                 &app.palette,
             );
         } else {
@@ -506,7 +505,6 @@ fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) 
                 toast,
                 has_config_diagnostic,
                 toast.position.unwrap_or(app.toast_config.herdr.position),
-                &app.status_colors,
                 &app.palette,
             );
             toast_rect = Some(toast_notification_rect(
