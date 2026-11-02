@@ -23,13 +23,6 @@ impl App {
             let Some(plugin) = self.state.installed_plugins.get(&plugin_id) else {
                 return encode_error(id, "plugin_not_found", "plugin not found");
             };
-            if !super::plugins::plugin_manifest_available(plugin) {
-                return encode_error(
-                    id,
-                    "plugin_manifest_unavailable",
-                    format!("plugin {plugin_id} manifest is unavailable"),
-                );
-            }
             if !plugin.enabled {
                 return encode_error(id, "plugin_disabled", "plugin is disabled");
             }
@@ -94,9 +87,6 @@ impl App {
 
     fn replace_agent_view_override(&mut self, view: Option<AgentViewSetParams>) {
         self.state.agent_view_override = view;
-        self.state.plugin_agent_view_selection = None;
-        self.state.agent_panel_scroll = 0;
-        self.state.mobile_switcher_scroll = 0;
     }
 }
 
@@ -104,14 +94,14 @@ impl App {
 mod tests {
     use super::*;
     use crate::api::schema::{
-        AgentViewBuiltinField, AgentViewField, AgentViewFilter, AgentViewValue, InstalledPluginInfo,
+        AgentViewBuiltinField, AgentViewField, AgentViewFilter, AgentViewValue,
     };
 
     fn test_app() -> App {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         App::new(
             &crate::config::Config::default(),
-            true,
+            crate::app::AppPolicy::TEST,
             None,
             api_rx,
             crate::api::EventHub::default(),
@@ -189,43 +179,5 @@ mod tests {
                 .map(|view| view.source.as_str()),
             Some("example.views")
         );
-    }
-
-    #[test]
-    fn unavailable_plugin_cannot_set_agent_view() {
-        let mut app = test_app();
-        app.state.installed_plugins.insert(
-            "example.views".into(),
-            InstalledPluginInfo {
-                plugin_id: "example.views".into(),
-                name: "Example Views".into(),
-                version: "0.1.0".into(),
-                min_herdr_version: crate::build_info::BASE_VERSION.into(),
-                description: None,
-                manifest_path: "/missing/herdr-plugin.toml".into(),
-                plugin_root: "/missing".into(),
-                enabled: true,
-                platforms: None,
-                build: Vec::new(),
-                startup: Vec::new(),
-                actions: Vec::new(),
-                events: Vec::new(),
-                panes: Vec::new(),
-                agent_views: Vec::new(),
-                link_handlers: Vec::new(),
-                source: Default::default(),
-                warnings: vec![format!(
-                    "{}missing manifest",
-                    crate::persist::plugin_registry::MANIFEST_UNAVAILABLE_WARNING_PREFIX
-                )],
-            },
-        );
-
-        let response =
-            app.handle_agent_view_set("unavailable".into(), working_view("plugin:example.views"));
-        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
-
-        assert_eq!(response["error"]["code"], "plugin_manifest_unavailable");
-        assert!(app.state.agent_view_override.is_none());
     }
 }

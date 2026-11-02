@@ -5,9 +5,6 @@ use crate::detect::AgentState;
 
 use super::{TerminalState, TerminalStateMutation};
 
-const MUTED_TOKEN: &str = "muted";
-const MUTED_TOKEN_VALUE: &str = "true";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentMetadata {
     pub source: String,
@@ -46,11 +43,6 @@ pub struct EffectivePresentation {
     pub state_labels: HashMap<String, String>,
 }
 
-enum MuteState {
-    Muted,
-    Unmuted,
-}
-
 impl EffectivePresentation {
     fn empty() -> Self {
         Self {
@@ -62,37 +54,6 @@ impl EffectivePresentation {
 }
 
 impl TerminalState {
-    pub(crate) fn is_muted(&self) -> bool {
-        self.muted
-    }
-
-    pub(crate) fn mute(&mut self) -> bool {
-        self.set_mute_state(MuteState::Muted)
-    }
-
-    pub(crate) fn unmute(&mut self) -> bool {
-        self.set_mute_state(MuteState::Unmuted)
-    }
-
-    fn set_mute_state(&mut self, state: MuteState) -> bool {
-        let (muted, token) = match state {
-            MuteState::Muted => (true, Some(MUTED_TOKEN_VALUE.to_string())),
-            MuteState::Unmuted => (false, None),
-        };
-        let state_changed = self.muted != muted;
-        self.muted = muted;
-        let token_changed = self.metadata_tokens.patch(
-            HashMap::from([(MUTED_TOKEN.to_string(), token)]),
-            None,
-            Instant::now(),
-        );
-        if state_changed || token_changed {
-            self.revision = self.revision.saturating_add(1);
-        }
-
-        state_changed || token_changed
-    }
-
     pub(crate) fn metadata_report_sequence_is_fresh(&self, source: &str, seq: Option<u64>) -> bool {
         crate::metadata_tokens::sequence_is_fresh(&self.metadata_report_sequences, source, seq)
     }
@@ -569,28 +530,6 @@ mod tests {
     }
 
     #[test]
-    fn tests_that_muting_sets_the_token_and_unmuting_clears_it() {
-        let mut terminal = test_terminal();
-
-        terminal.mute();
-
-        assert!(terminal.is_muted());
-        assert_eq!(
-            terminal
-                .metadata_tokens
-                .values()
-                .get(MUTED_TOKEN)
-                .map(String::as_str),
-            Some(MUTED_TOKEN_VALUE)
-        );
-
-        terminal.unmute();
-
-        assert!(!terminal.is_muted());
-        assert!(!terminal.metadata_tokens.values().contains_key(MUTED_TOKEN));
-    }
-
-    #[test]
     fn presentation_sequences_remain_unbounded_while_token_sequences_are_bounded() {
         let mut terminal = test_terminal();
         for index in 0..=crate::metadata_tokens::MAX_SEQUENCE_SOURCES {
@@ -922,7 +861,9 @@ mod tests {
             clear_title: false,
             clear_display_agent: false,
             clear_state_labels: false,
-            ttl: Some(Duration::from_millis(1)),
+            // Expiry is forced with the captured deadline below; keep the
+            // no-extension assertion independent of wall-clock scheduling.
+            ttl: Some(Duration::from_secs(60)),
             seq: None,
         });
         let old_deadline = terminal.next_agent_metadata_expiry().unwrap();
@@ -942,11 +883,12 @@ mod tests {
         });
 
         assert_eq!(terminal.next_agent_metadata_expiry(), Some(old_deadline));
-        assert_eq!(
-            terminal.effective_presentation().title.as_deref(),
-            Some("Prompt title")
+        let presentation = terminal.effective_presentation_for_state_at(
+            terminal.state,
+            old_deadline - Duration::from_millis(1),
         );
-        assert_eq!(terminal.effective_presentation().display_agent, None);
+        assert_eq!(presentation.title.as_deref(), Some("Prompt title"));
+        assert_eq!(presentation.display_agent, None);
 
         let mutation = terminal
             .expire_agent_metadata_at(old_deadline, old_deadline)

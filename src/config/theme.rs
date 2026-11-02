@@ -119,25 +119,45 @@ pub struct CustomThemeColors {
     pub blue: Option<String>,
     pub teal: Option<String>,
     pub peach: Option<String>,
+    /// Overrides applied when `auto_switch` selects a light appearance.
+    pub light: Option<ModeThemeColors>,
+    /// Overrides applied when `auto_switch` selects a dark appearance.
+    pub dark: Option<ModeThemeColors>,
+}
+
+/// Per-token color overrides for one auto-switch appearance.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ModeThemeColors {
+    pub accent: Option<String>,
+    pub panel_bg: Option<String>,
+    pub sidebar_bg: Option<String>,
+    pub active_row_bg: Option<String>,
+    pub selection_bg: Option<String>,
+    pub surface0: Option<String>,
+    pub surface1: Option<String>,
+    pub surface_dim: Option<String>,
+    pub overlay0: Option<String>,
+    pub overlay1: Option<String>,
+    pub text: Option<String>,
+    pub subtext0: Option<String>,
+    pub mauve: Option<String>,
+    pub green: Option<String>,
+    pub yellow: Option<String>,
+    pub red: Option<String>,
+    pub blue: Option<String>,
+    pub teal: Option<String>,
+    pub peach: Option<String>,
 }
 
 /// Parse a color string into a ratatui Color.
 /// Supports: hex (#rrggbb, #rgb), named colors, rgb(r,g,b), and reset aliases.
 pub fn parse_color(s: &str) -> ratatui::style::Color {
-    parse_color_checked(s).unwrap_or_else(|| {
-        warn!(color = s, "unknown color, defaulting to cyan");
-        ratatui::style::Color::Cyan
-    })
-}
-
-/// Parse a color string, returning `None` when the value is not recognized.
-/// Callers that report configuration diagnostics use this instead of [`parse_color`].
-pub fn parse_color_checked(s: &str) -> Option<ratatui::style::Color> {
     use ratatui::style::Color;
     let s = s.trim().to_lowercase();
 
     match s.as_str() {
-        "reset" | "default" | "none" | "transparent" => return Some(Color::Reset),
+        "reset" | "default" | "none" | "transparent" => return Color::Reset,
         _ => {}
     }
 
@@ -148,7 +168,7 @@ pub fn parse_color_checked(s: &str) -> Option<ratatui::style::Color> {
                 u8::from_str_radix(&hex[2..4], 16),
                 u8::from_str_radix(&hex[4..6], 16),
             ) {
-                return Some(Color::Rgb(r, g, b));
+                return Color::Rgb(r, g, b);
             }
         } else if hex.len() == 3 {
             let chars: Vec<u8> = hex
@@ -156,7 +176,7 @@ pub fn parse_color_checked(s: &str) -> Option<ratatui::style::Color> {
                 .filter_map(|c| u8::from_str_radix(&c.to_string(), 16).ok())
                 .collect();
             if chars.len() == 3 {
-                return Some(Color::Rgb(chars[0] * 17, chars[1] * 17, chars[2] * 17));
+                return Color::Rgb(chars[0] * 17, chars[1] * 17, chars[2] * 17);
             }
         }
     }
@@ -169,12 +189,12 @@ pub fn parse_color_checked(s: &str) -> Option<ratatui::style::Color> {
                 parts[1].trim().parse::<u8>(),
                 parts[2].trim().parse::<u8>(),
             ) {
-                return Some(Color::Rgb(r, g, b));
+                return Color::Rgb(r, g, b);
             }
         }
     }
 
-    let named = match s.as_str() {
+    match s.as_str() {
         "black" => Color::Black,
         "red" => Color::Red,
         "green" => Color::Green,
@@ -191,9 +211,11 @@ pub fn parse_color_checked(s: &str) -> Option<ratatui::style::Color> {
         "lightblue" => Color::LightBlue,
         "lightmagenta" => Color::LightMagenta,
         "lightcyan" => Color::LightCyan,
-        _ => return None,
-    };
-    Some(named)
+        _ => {
+            warn!(color = s, "unknown color, defaulting to cyan");
+            Color::Cyan
+        }
+    }
 }
 
 #[cfg(test)]
@@ -288,6 +310,35 @@ red = "rgb(255, 85, 85)"
         assert_eq!(custom.accent.as_deref(), Some("#ff79c6"));
         assert_eq!(custom.red.as_deref(), Some("rgb(255, 85, 85)"));
         assert!(custom.green.is_none());
+    }
+
+    #[test]
+    fn theme_custom_mode_overrides_parse() {
+        let toml = r##"
+[theme.custom]
+accent = "#010203"
+
+[theme.custom.light]
+accent = "#040506"
+text = "#070809"
+selection_bg = "#101112"
+
+[theme.custom.dark]
+panel_bg = "#0a0b0c"
+sidebar_bg = "#0d0e0f"
+active_row_bg = "#131415"
+"##;
+        let config: Config = toml::from_str(toml).unwrap();
+        let custom = config.theme.custom.as_ref().unwrap();
+        assert_eq!(custom.accent.as_deref(), Some("#010203"));
+        let light = custom.light.as_ref().unwrap();
+        assert_eq!(light.accent.as_deref(), Some("#040506"));
+        assert_eq!(light.text.as_deref(), Some("#070809"));
+        assert_eq!(light.selection_bg.as_deref(), Some("#101112"));
+        let dark = custom.dark.as_ref().unwrap();
+        assert_eq!(dark.panel_bg.as_deref(), Some("#0a0b0c"));
+        assert_eq!(dark.sidebar_bg.as_deref(), Some("#0d0e0f"));
+        assert_eq!(dark.active_row_bg.as_deref(), Some("#131415"));
     }
 
     #[test]

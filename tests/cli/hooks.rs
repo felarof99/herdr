@@ -37,6 +37,15 @@ fn run_devin_hook(
     )
 }
 
+fn run_grok_hook(hook_input: &str, envs: &[(&str, &str)]) -> Option<serde_json::Value> {
+    run_shell_hook_with_env(
+        "src/integration/assets/grok/herdr-agent-state.sh",
+        &["session"],
+        hook_input,
+        envs,
+    )
+}
+
 fn run_shell_hook(asset_path: &str, args: &[&str], hook_input: &str) -> Option<serde_json::Value> {
     run_shell_hook_with_env(asset_path, args, hook_input, &[])
 }
@@ -51,11 +60,15 @@ fn run_shell_hook_with_env(
     fs::create_dir_all(&base).unwrap();
     let socket_path = base.join("herdr.sock");
     let listener = UnixListener::bind(&socket_path).unwrap();
+    let hook_exited = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_hook_exited = hook_exited.clone();
 
+    // Accept until the hook has exited instead of racing a timer on slow runners.
     let server = thread::spawn(move || {
         listener.set_nonblocking(true).unwrap();
-        let deadline = Instant::now() + Duration::from_millis(700);
-        while Instant::now() < deadline {
+        loop {
+            // Read before accept so a connection made just before exit is still seen.
+            let exited = server_hook_exited.load(std::sync::atomic::Ordering::Acquire);
             match listener.accept() {
                 Ok((mut stream, _)) => {
                     let mut line = String::new();
@@ -66,13 +79,13 @@ fn run_shell_hook_with_env(
                     let _ = stream.flush();
                     return Some(line);
                 }
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock && exited => return None,
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(10));
                 }
                 Err(err) => panic!("accept failed: {err}"),
             }
         }
-        None
     });
 
     let hook_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(asset_path);
@@ -84,6 +97,7 @@ fn run_shell_hook_with_env(
         .env("HERDR_SOCKET_PATH", &socket_path)
         .env("HERDR_PANE_ID", "p_test")
         .env_remove("CODEX_THREAD_ID")
+        .env_remove("CURSOR_VERSION")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -96,6 +110,7 @@ fn run_shell_hook_with_env(
     drop(stdin);
 
     let output = child.wait_with_output().unwrap();
+    hook_exited.store(true, std::sync::atomic::Ordering::Release);
     assert!(
         output.status.success(),
         "hook failed: status={:?} stderr={} stdout={}",
@@ -148,6 +163,31 @@ fn claude_hook_reports_session_id_from_stdin() {
     assert_eq!(request["method"], "pane.report_agent_session");
     assert_eq!(request["params"]["agent_session_id"], "claude-session");
     assert!(request["params"].get("state").is_none());
+}
+
+#[test]
+fn claude_hook_ignores_cursor_compatibility_payloads() {
+    assert!(run_claude_hook(
+        "session",
+        r#"{"hook_event_name":"sessionStart","session_id":"cursor-session"}"#,
+    )
+    .is_none());
+
+    assert!(run_claude_hook(
+        "session",
+        r#"{"hook_event_name":"SessionStart","session_id":"cursor-session","cursor_version":"2026.08.11-e8db854"}"#,
+    )
+    .is_none());
+
+    for cursor_version in ["2026.08.11-e8db854", ""] {
+        assert!(run_shell_hook_with_env(
+            "src/integration/assets/claude/herdr-agent-state.sh",
+            &["session"],
+            r#"{"hook_event_name":"SessionStart","session_id":"cursor-session"}"#,
+            &[("CURSOR_VERSION", cursor_version)],
+        )
+        .is_none());
+    }
 }
 
 #[test]
@@ -209,6 +249,19 @@ fn copilot_hook_reports_session_id_from_stdin() {
     assert_eq!(camel["method"], "pane.report_agent_session");
     assert_eq!(camel["params"]["agent_session_id"], "copilot-camel-session");
     assert!(camel["params"].get("state").is_none());
+}
+
+#[test]
+fn grok_hook_reports_new_session_source() {
+    let request = run_grok_hook(
+        r#"{"hook_event_name":"session_start","source":"new","session_id":"new-session"}"#,
+        &[("GROK_SESSION_ID", "new-session")],
+    )
+    .expect("grok session start should report session identity");
+
+    assert_eq!(request["method"], "pane.report_agent_session");
+    assert_eq!(request["params"]["agent_session_id"], "new-session");
+    assert_eq!(request["params"]["session_start_source"], "new");
 }
 
 #[test]
